@@ -61,6 +61,7 @@ def cleaningtestset(path= 'test.csv'):
     return cleanedtestfeatures
 
 def main():
+    ##comment out now that everything is cleaned
     cleanedtrain = cleantrainingset('train.csv')
     print(cleanedtrain.head())
     cleanedtest = cleaningtestset('test.csv')
