@@ -43,7 +43,7 @@ def cleaningtestset(path= 'test.csv'):
     testdf = pd.read_csv('test.csv')
     testdf["Age"] = testdf["Age"].fillna(testdf["Age"].median())
 
-    if 'Cabin' not in testdf.columns:   #incase cains column wapis urrjae
+    if 'Cabin' not in testdf.columns:   #incase cabins column wapis urrjae
         testdf["Cabin"] = "U"
     else:
         testdf["Cabin"].fillna("U")
