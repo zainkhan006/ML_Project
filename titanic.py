@@ -8,8 +8,9 @@ import matplotlib.pyplot as plt
 df = pd.read_csv('cleanedtrain.csv')
 print(f"\ndataset Shape: {df.shape}")
 print(f"target variable: survived (0: died, 1: survived)")
-print("\nfirst 5 rows:", df.head(5))
+print("\n row: ", df.head(5))
 
+#do not calculate gini or info gain(entropy) of Survived or PassengerID class
 def calculate_gini(data, feature, target):
     total = len(data)
     gini_index = 0
@@ -156,3 +157,25 @@ Both trees perform similarly, with info gain having a slightly higher accuracy.
 """)
 
 plt.show()
+
+#seeing how many predictions are more or less same
+giniprediction = dt_gini.predict(X_test)
+entropyprediction = dt_entropy.predict(X_test)
+disagree = (giniprediction != entropyprediction).sum()
+print(f"model disagrees on {disagree} out of {len(X_test)} predictions")
+
+# total = 891
+# 80% of 891 = 718
+# so training = 718 features, validation set = 179 features
+# model disagrees on 2 out of 179 features, hence we will use entropy wali tree to make predictions since almost all predictions bw gini and entropy tree are same
+
+test = pd.read_csv('cleanedtest.csv')
+features = ['Pclass', 'Sex', 'Age', 'SibSp', 'Parch', 'Fare', 'CabinOnDeck', 'Embarked']
+xtest_entropy = test[features]
+predictions = dt_entropy.predict(xtest_entropy)
+predictionfile = pd.DataFrame({
+    'PassengerId': test['PassengerId'],
+    'Survived': predictions
+})
+predictionfile.to_csv('predictions.csv', index=False)
+print(f"first few predictions: \n{predictionfile.head(10)}")
