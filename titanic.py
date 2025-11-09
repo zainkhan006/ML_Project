@@ -4,6 +4,7 @@ from sklearn.tree import DecisionTreeClassifier, plot_tree
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, classification_report
 import matplotlib.pyplot as plt
+from sklearn.ensemble import RandomForestClassifier
 
 df = pd.read_csv('cleanedtrain.csv')
 print(f"\ndataset Shape: {df.shape}")
@@ -145,11 +146,11 @@ print("\nSUMMARY: ")
 print(f"""
 Manual Gini index calculated for all features
 Manual Information gain calculated for all features
-Two Decision tres trained:
+Two Decision trees trained:
  1: CART with Gini: {acc_gini*100:.2f}% accuracy
  2: CART with info gain: {acc_entropy*100:.2f}% accuracy
 
-key findigns:
+Key findings:
 - Best feature by Gini: {sorted_gini[0][0]} (lowest Gini = {sorted_gini[0][1]:.4f})
 - Best feature by Info Gain: {sorted_ig[0][0]} (highest IG = {sorted_ig[0][1]:.4f})
 
@@ -179,3 +180,52 @@ predictionfile = pd.DataFrame({
 })
 predictionfile.to_csv('predictions.csv', index=False)
 print(f"first few predictions: \n{predictionfile.head(10)}")
+
+
+#Random Forrest Classifier
+print("\n\nTraining Random Forest Classifier...")
+
+# Initialize Random Forest with 100 trees
+rf_classifier = RandomForestClassifier(n_estimators=100, max_depth=4, random_state=42)
+
+# Train the model
+rf_classifier.fit(X_train, y_train)
+
+# Make predictions
+y_pred_rf = rf_classifier.predict(X_test)
+acc_rf = accuracy_score(y_test, y_pred_rf)
+print(f"\nRandom Forest Accuracy: {acc_rf:.4f} ({acc_rf*100:.2f}%)")
+
+# Compare feature importances
+print("\nFeature importances from Random Forest:")
+for feature, importance in zip(features, rf_classifier.feature_importances_):
+    print(f"{feature:15s} | Importance: {importance:.4f}")
+
+# Compare predictions with Decision Trees
+rf_predictions = rf_classifier.predict(X_test)
+disagree_rf_gini = (rf_predictions != giniprediction).sum()
+disagree_rf_entropy = (rf_predictions != entropyprediction).sum()
+print(f"\nRandom Forest disagrees with Gini tree on {disagree_rf_gini} out of {len(X_test)} predictions")
+print(f"Random Forest disagrees with Entropy tree on {disagree_rf_entropy} out of {len(X_test)} predictions")
+
+# Make predictions on test set using Random Forest
+rf_test_predictions = rf_classifier.predict(xtest_entropy)
+rf_predictionfile = pd.DataFrame({
+    'PassengerId': test['PassengerId'],
+    'Survived': rf_test_predictions
+})
+rf_predictionfile.to_csv('rf_predictions.csv', index=False)
+print(f"\nRandom Forest predictions saved to 'rf_predictions.csv'")
+print(f"First few Random Forest predictions:\n{rf_predictionfile.head(10)}")
+
+print("\nFINAL SUMMARY:")
+print(f"""
+Model Comparison:
+1. Decision Tree (Gini): {acc_gini*100:.2f}% accuracy
+2. Decision Tree (Info Gain): {acc_entropy*100:.2f}% accuracy
+3. Random Forest: {acc_rf*100:.2f}% accuracy
+
+The Random Forest classifier combines multiple decision trees to make predictions.
+Each tree in the forest is trained on a different subset of the data, which helps
+reduce overfitting and generally leads to more robust predictions than a single
+decision tree.""")
