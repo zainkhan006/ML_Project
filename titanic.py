@@ -182,13 +182,67 @@ predictionfile.to_csv('predictions.csv', index=False)
 print(f"first few predictions: \n{predictionfile.head(10)}")
 
 
-#Random Forrest Classifier
-print("\n\nTraining Random Forest Classifier...")
+#Random Forest Classifier with Optimization
+print("\n\nOptimizing Random Forest Classifier...")
+from sklearn.model_selection import GridSearchCV, cross_val_score
+from sklearn.preprocessing import StandardScaler
 
-# Initialize Random Forest with 100 trees
-rf_classifier = RandomForestClassifier(n_estimators=100, max_depth=4, random_state=42)
+# Feature Engineering
+print("Performing feature engineering...")
+# Add interaction features
+X['Age_Class'] = X['Age'] * X['Pclass']
+X['Fare_Per_Person'] = X['Fare'] / (X['SibSp'] + X['Parch'] + 1)
+X_train['Age_Class'] = X_train['Age'] * X_train['Pclass']
+X_train['Fare_Per_Person'] = X_train['Fare'] / (X_train['SibSp'] + X_train['Parch'] + 1)
+X_test['Age_Class'] = X_test['Age'] * X_test['Pclass']
+X_test['Fare_Per_Person'] = X_test['Fare'] / (X_test['SibSp'] + X_test['Parch'] + 1)
 
-# Train the model
+# Scale numerical features
+scaler = StandardScaler()
+numerical_features = ['Age', 'Fare', 'Age_Class', 'Fare_Per_Person']
+X_train[numerical_features] = scaler.fit_transform(X_train[numerical_features])
+X_test[numerical_features] = scaler.transform(X_test[numerical_features])
+
+# Define parameter grid for GridSearchCV
+param_grid = {
+    'n_estimators': [200, 300],
+    'max_depth': [5, 7],
+    'min_samples_split': [2, 5],
+    'min_samples_leaf': [1, 2],
+    'max_features': ['sqrt', 'log2'],
+    'class_weight': ['balanced', None]
+}
+
+# Initialize base Random Forest
+base_rf = RandomForestClassifier(random_state=42)
+
+# Perform Grid Search with Cross Validation
+print("Performing Grid Search with 5-fold Cross Validation...")
+grid_search = GridSearchCV(
+    estimator=base_rf,
+    param_grid=param_grid,
+    cv=5,
+    scoring='accuracy',
+    n_jobs=-1,
+    verbose=1
+)
+
+# Fit the grid search
+grid_search.fit(X_train, y_train)
+
+# Get best model
+rf_classifier = grid_search.best_estimator_
+
+print(f"\nBest parameters found:")
+for param, value in grid_search.best_params_.items():
+    print(f"{param}: {value}")
+
+# Perform cross-validation on the best model
+cv_scores = cross_val_score(rf_classifier, X_train, y_train, cv=5)
+print(f"\nCross-validation scores: {cv_scores}")
+print(f"Average CV score: {cv_scores.mean():.4f} (+/- {cv_scores.std() * 2:.4f})")
+
+# Train the final model with best parameters
 rf_classifier.fit(X_train, y_train)
 
 # Make predictions
@@ -208,7 +262,14 @@ disagree_rf_entropy = (rf_predictions != entropyprediction).sum()
 print(f"\nRandom Forest disagrees with Gini tree on {disagree_rf_gini} out of {len(X_test)} predictions")
 print(f"Random Forest disagrees with Entropy tree on {disagree_rf_entropy} out of {len(X_test)} predictions")
 
-# Make predictions on test set using Random Forest
+# Add engineered features to test set
+xtest_entropy['Age_Class'] = xtest_entropy['Age'] * xtest_entropy['Pclass']
+xtest_entropy['Fare_Per_Person'] = xtest_entropy['Fare'] / (xtest_entropy['SibSp'] + xtest_entropy['Parch'] + 1)
+
+# Scale numerical features for test set
+xtest_entropy[numerical_features] = scaler.transform(xtest_entropy[numerical_features])
+
+# Make predictions on test set using optimized Random Forest
 rf_test_predictions = rf_classifier.predict(xtest_entropy)
 rf_predictionfile = pd.DataFrame({
     'PassengerId': test['PassengerId'],
