@@ -223,7 +223,7 @@ dtSubmission = pd.DataFrame({
     'PassengerId': test['PassengerId'],
     'Survived': dtPredictions
 })
-dtSubmission.to_csv('dtpredictions.csv')
+dtSubmission.to_csv('dtpredictions.csv', index=False)
 print("dt file saved")
 
 rfPredictions = rfClassifier.predict(testFeatures)
