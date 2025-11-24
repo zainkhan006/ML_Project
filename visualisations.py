@@ -16,8 +16,13 @@ dfTrain.name = 'Training Set'
 dfTest.name = 'Test Set'
 dfAll = concatenateDf(dfTrain, dfTest)
 dfAll['Deck'] = dfAll['Cabin'].apply(lambda s: s[0] if pd.notnull(s) else 'M')
+dfTrain['Deck'] = dfTrain['Cabin'].apply(lambda s: s[0] if pd.notnull(s) else 'M')
+dfTest['Deck'] = dfTest['Cabin'].apply(lambda s: s[0] if pd.notnull(s) else 'M')
 dfAllDecks = dfAll.groupby(['Deck', 'Pclass']).count().drop(columns=['Survived', 'Sex', 'Age', 'SibSp', 'Parch', 
                                                                         'Fare', 'Embarked', 'Cabin', 'PassengerId', 'Ticket']).rename(columns={'Name': 'Count'}).transpose()
+
+####################################################### preprocessing visualisations #########################################################################
+
 
 def getPclassDistance(df):
     deckCounts = {'A': {}, 'B': {}, 'C': {}, 'D': {}, 'E': {}, 'F': {}, 'G': {}, 'M': {}, 'T': {}}
@@ -117,3 +122,104 @@ def displaySurvivalDistance(percentages):
 
 allSurvivedCount, allSurvivedPer = getSurvivedDistance(dfAllSurvivingDecks)
 displaySurvivalDistance(allSurvivedPer)
+
+survived = dfTrain['Survived'].value_counts()[1]
+notSurvived = dfTrain['Survived'].value_counts()[0]
+survivedPersons = survived / dfTrain.shape[0] * 100
+DeadPersons = notSurvived / dfTrain.shape[0] * 100
+
+print('{} of {} passengers survived and it is {:.2f}% of the training set.'.format(survived, dfTrain.shape[0], survivedPersons))
+print('{} of {} passengers didnt survive and it is {:.2f}% of the training set.'.format(notSurvived, dfTrain.shape[0], DeadPersons))
+
+plt.figure(figsize=(10, 8))
+sns.countplot(data=dfTrain, x='Survived')
+
+plt.xlabel('Survival', size=15, labelpad=15)
+plt.ylabel('Passenger Count', size=15, labelpad=15)
+plt.xticks((0, 1), ['Not Survived ({0:.2f}%)'.format(DeadPersons), 'Survived ({0:.2f}%)'.format(survivedPersons)])
+plt.tick_params(axis='x', labelsize=13)
+plt.tick_params(axis='y', labelsize=13)
+plt.title('Training Set Survival Distribution', size=15, y=1.05)
+plt.show()
+
+df_train_corr = dfTrain.drop(['PassengerId'], axis=1).corr(numeric_only=True).abs().unstack().sort_values(kind="quicksort", ascending=False).reset_index()
+df_train_corr.rename(columns={"level_0": "Feature 1", "level_1": "Feature 2", 0: 'Correlation Coefficient'}, inplace=True)
+df_train_corr.drop(df_train_corr.iloc[1::2].index, inplace=True)
+df_train_corr_nd = df_train_corr.drop(df_train_corr[df_train_corr['Correlation Coefficient'] == 1.0].index)
+
+df_test_corr = dfTest.corr(numeric_only=True).abs().unstack().sort_values(kind="quicksort", ascending=False).reset_index()
+df_test_corr.rename(columns={"level_0": "Feature 1", "level_1": "Feature 2", 0: 'Correlation Coefficient'}, inplace=True)
+df_test_corr.drop(df_test_corr.iloc[1::2].index, inplace=True)
+df_test_corr_nd = df_test_corr.drop(df_test_corr[df_test_corr['Correlation Coefficient'] == 1.0].index)
+
+traincorr = df_train_corr_nd['Correlation Coefficient'] > 0.1
+print(df_train_corr_nd[traincorr])
+
+testcorr = df_test_corr_nd['Correlation Coefficient'] > 0.1
+print(df_test_corr_nd[testcorr])
+
+fig, axs = plt.subplots(nrows=2, figsize=(20, 20))
+
+sns.heatmap(dfTrain.drop(['PassengerId'], axis=1).corr(numeric_only=True), ax=axs[0], annot=True, square=True, cmap='coolwarm', annot_kws={'size': 10})
+sns.heatmap(dfTest.drop(['PassengerId'], axis=1).corr(numeric_only=True), ax=axs[1], annot=True, square=True, cmap='coolwarm', annot_kws={'size': 10})
+
+for i in range(2):    
+    axs[i].tick_params(axis='x', labelsize=10)
+    axs[i].tick_params(axis='y', labelsize=10)
+    
+axs[0].set_title('Training Set Correlations', size=10)
+axs[1].set_title('Test Set Correlations', size=10)
+
+plt.show()
+
+cont_features = ['Age', 'Fare']
+surv = dfTrain['Survived'] == 1
+
+fig, axs = plt.subplots(ncols=2, nrows=2, figsize=(15, 15))
+plt.subplots_adjust(right=1.5)
+
+for i, feature in enumerate(cont_features):    
+    # Distribution of survival in feature
+    sns.histplot(dfTrain[~surv][feature], label='Not Survived', color='#e74c3c', ax=axs[0][i], kde=True, stat='density')
+    sns.histplot(dfTrain[surv][feature], label='Survived', color='#2ecc71', ax=axs[0][i], kde=True, stat='density')
+    
+    # Distribution of feature in dataset
+    sns.histplot(dfTrain[feature], label='Training Set', color='#e74c3c', ax=axs[1][i])
+    sns.histplot(dfTest[feature], label='Test Set', color='#2ecc71', ax=axs[1][i])
+    
+    axs[0][i].set_xlabel('')
+    axs[1][i].set_xlabel('')
+    
+    for j in range(2):        
+        axs[i][j].tick_params(axis='x', labelsize=10)
+        axs[i][j].tick_params(axis='y', labelsize=10)
+    
+    axs[0][i].legend(loc='upper right', prop={'size': 10})
+    axs[1][i].legend(loc='upper right', prop={'size': 10})
+    axs[0][i].set_title('Distribution of Survival in {}'.format(feature), size=10, y=1.00)
+
+axs[1][0].set_title('Distribution of {} Feature'.format('Age'), size=10, y=1.0)
+axs[1][1].set_title('Distribution of {} Feature'.format('Fare'), size=10, y=1.0)
+plt.tight_layout()      
+plt.show()
+
+cat_features = ['Embarked', 'Parch', 'Pclass', 'Sex', 'SibSp', 'Deck']
+
+fig, axs = plt.subplots(ncols=2, nrows=3, figsize=(10, 10))
+plt.subplots_adjust(right=1.5, top=1.25)
+
+for i, feature in enumerate(cat_features, 1):    
+    plt.subplot(2, 3, i)
+    sns.countplot(x=feature, hue='Survived', data=dfTrain)
+    
+    plt.xlabel('{}'.format(feature), size=10, labelpad=15)
+    plt.ylabel('Passenger Count', size=10, labelpad=15)    
+    plt.tick_params(axis='x', labelsize=10)
+    plt.tick_params(axis='y', labelsize=10)
+    
+    plt.legend(['Not Survived', 'Survived'], loc='upper center', prop={'size': 10})
+    plt.title('Count of Survival in {} Feature'.format(feature), size=10, y=1.00)
+
+plt.show()
+
+#################################################feature engineering visualisations###################################################################
