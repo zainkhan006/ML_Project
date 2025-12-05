@@ -1,6 +1,5 @@
 [theme]
-primaryColor="#FF6B6B"        # Main accent color (buttons, sliders)
-backgroundColor="#000000"      # Background color
-secondaryBackgroundColor="#565F64"  # Sidebar and widget backgrounds
-textColor="#00A19B"           # Text color
-font="monospace"             # Font choice
+primaryColor="#ed0c0cff"        # Main accent color (buttons, sliders)
+backgroundColor="#0b0c10"      # Background color
+secondaryBackgroundColor="#24030356"  # Sidebar and widget backgrounds
+textColor="#FFEF00"           # Text color
