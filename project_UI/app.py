@@ -247,7 +247,7 @@ if st.session_state.page == 'welcome':
             text-align: center;
             font-size: 1.5rem;
             margin-bottom: 3rem;
-            color: #66fcf1;
+            color: #FFEF00;
         }
         
         /* Flip card container */
@@ -286,12 +286,14 @@ if st.session_state.page == 'welcome':
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         }
         
+        /* CYBERPUNK FRONT CARD - Simple gradient, no pseudo-elements */
         .card-front {
-            background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%);
+            background: linear-gradient(135deg, #1a1a2e 0%, #0f3460 100%);
         }
         
+        /* CYBERPUNK BACK CARD - Purple gradient */
         .card-back {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #8338ec 0%, #3a0ca3 100%);
             color: white;
             transform: rotateY(180deg);
             padding: 2.5rem 2rem;
@@ -301,14 +303,15 @@ if st.session_state.page == 'welcome':
         .card-front-title {
             font-size: 2.5rem;
             font-weight: bold;
-            color: #333;
+            color: #66fcf1;
             margin-bottom: 1rem;
             text-align: center;
+            text-shadow: 0 0 20px rgba(102, 252, 241, 0.5);
         }
         
         .card-front-subtitle {
             font-size: 1rem;
-            color: #666;
+            color: #c9d1d9;
             text-align: center;
         }
         
@@ -332,6 +335,13 @@ if st.session_state.page == 'welcome':
             backdrop-filter: blur(10px);
             border: 1px solid rgba(255, 255, 255, 0.2);
             text-align: left;
+            transition: all 0.3s ease;
+        }
+        
+        .mini-item:hover {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: rgba(102, 252, 241, 0.5);
+            transform: translateX(5px);
         }
         
         .mini-icon {
@@ -344,9 +354,13 @@ if st.session_state.page == 'welcome':
             line-height: 1.4;
         }
         
-        /* Alternative gradient for second card */
+        .mini-text strong {
+            color: #66fcf1;
+        }
+        
+        /* Alternative gradient for second card - Hot pink */
         .card-back-alt {
-            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            background: linear-gradient(135deg, #ff006e 0%, #fb5607 100%);
         }
         </style>
     """, unsafe_allow_html=True)
@@ -420,7 +434,6 @@ if st.session_state.page == 'welcome':
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.button("Get Started →", on_click=goToDatasetInfo, type="primary", use_container_width=True)
-
 ######################################################## dataset info page ###################################################################################
 elif st.session_state.page == 'dataset_info':
     st.title("ⓘ About the dataset")
@@ -495,7 +508,7 @@ elif st.session_state.page == 'problem_choice':
     Machine learning problems fall into different categories. For this dataset, we'll focus on:
     """)
     
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         st.markdown("""
@@ -511,6 +524,8 @@ elif st.session_state.page == 'problem_choice':
         - Logistic regression
         - SVM(Support vector machines)
         - KNN(K Nearest neighbours)
+        - Perceptrons
+        - Neural Networks
         
         **Learning outcomes:**
         - Binary classification
@@ -534,18 +549,51 @@ elif st.session_state.page == 'problem_choice':
         
         **Example:** Predicting a passenger's age or ticket fare
         
-        **Status:** Coming Soon!
+        **Status:** Coming soon
         
         **Models:**
         - Linear regression
         - Ridge regression
         - Lasso regression
-        - Decision tree regressor
-        - Random forest regressor
+                    
+        **What you'll learn:**
+        - Continuous value prediction
+        - Mean squared error and R² score
+        - L1 and L2 regularisation techniques
+        - Feature scaling and it's importance
+        - Handling outliers in predictions
         """)
         
         st.button(
             "Regression (Coming Soon)", 
+            disabled=True,
+            use_container_width=True
+        )
+
+    with col3:
+        st.markdown("""
+        ### Deep Learning
+        
+        **Goal:** Use artificial neurons to learn complex patterns
+        
+        **Status:** Coming Soon!
+        
+        **Models:**
+        - Perceptrons(simplest neurons)
+        - Neural networks
+                    
+        **What you'll learn:**
+        - How neural networks learn
+        - Activation functions (reLU, sigmoid, tanh)
+        - Backpropagation and gradient descent
+        - Network architecture design
+        - Learning rate tuning
+        - When deep learning helps (and when it doesn't)
+        - Comparing simple vs complex models
+        """)
+        
+        st.button(
+            "MLP", 
             disabled=True,
             use_container_width=True
         )

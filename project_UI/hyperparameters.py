@@ -1,17 +1,19 @@
 hyperparameters = {
     'Decision Tree': {
-        'best_accuracy': 0.8101,  #one of gini or info gain ki accuracy 
+        'best_accuracy': 0.8268,  # Optimized with GridSearchCV
         'best_params': {
-            'criterion' : 'entropy',
-            'max_depth' : 4,
-            'random_state' : 2025
+            'criterion': 'gini',
+            'max_depth': 6,
+            'max_features': None,
+            'min_samples_leaf': 2,
+            'min_samples_split': 10
         }
     },
     'Random Forest': {
         'best_accuracy': 0.8045,
         'best_params': {
             'criterion': 'gini',
-            'max_depth' : 5,
+            'max_depth': 5,
             'max_features': 'log2',
             'min_samples_leaf': 1,
             'min_samples_split': 2,
@@ -24,7 +26,7 @@ hyperparameters = {
             'C': 0.1,
             'max_iter': 1000,
             'penalty': 'l2',
-            'solver': 'liblinear',
+            'solver': 'liblinear'
         }
     },
     'SVM': {

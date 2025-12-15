@@ -110,19 +110,19 @@ for i, (feature, ig) in enumerate(sortedIG, 1):
     print(f"{i}. {feature:15s} | Info Gain: {ig:.4f}")
 
 ###################################################################feature engineering ####################################################################
-# print("\nfeature engineering:")
+print("\nfeature engineering:")
 
-# X = df[features].copy()
-# y = df[target]
+X = df[features].copy()
+y = df[target]
 
-# X['AgeClass'] = X['Age'] * X['Pclass']
-# X['FarePerPerson'] = X['Fare'] / (X['SibSp'] + X['Parch'] + 1)
-# X['FarePerClass'] = X['Fare'] / X['Pclass']
+X['AgeClass'] = X['Age'] * X['Pclass']
+X['FarePerPerson'] = X['Fare'] / (X['SibSp'] + X['Parch'] + 1)
+X['FarePerClass'] = X['Fare'] / X['Pclass']
 
-# print(f"Original features: {len(features)}")
-# print(f"Total features after engineering: {len(X.columns)}")
-# print(f"New features: {list(X.columns[len(features):])}")
-# print("feature engineering done :)")
+print(f"Original features: {len(features)}")
+print(f"Total features after engineering: {len(X.columns)}")
+print(f"New features: {list(X.columns[len(features):])}")
+print("feature engineering done :)")
 
 ############################################################splitting######################################################################################
 print("\nsplitting data:")
@@ -180,6 +180,52 @@ for feature, importance in zip(X.columns, dtEntropy.feature_importances_):
         print(f"{feature:20s} | Importance: {importance:.4f}")
 
 print("dt trained :)")
+
+# ========== NOW ADD THIS SECTION ==========
+
+print("\n" + "="*80)
+print("OPTIMIZING DECISION TREE WITH GRIDSEARCHCV")
+print("="*80)
+
+gridParametersDT = {
+    'criterion': ['gini', 'entropy'],
+    'max_depth': [3, 4, 5, 6, 7, 8, 10, 12],
+    'min_samples_split': [2, 5, 10, 15, 20],
+    'min_samples_leaf': [1, 2, 3, 4, 5],
+    'max_features': ['sqrt', 'log2', None]
+}
+
+baseDT = DecisionTreeClassifier(random_state=2025)
+gridSearchDT = GridSearchCV(
+    estimator=baseDT,
+    param_grid=gridParametersDT,
+    cv=5,
+    scoring='accuracy',
+    n_jobs=-1,
+    verbose=1
+)
+
+gridSearchDT.fit(X_train, y_train)
+dtOptimized = gridSearchDT.best_estimator_
+
+print("\nbest parameters found:")
+for param, value in gridSearchDT.best_params_.items():
+    print(f"{param}: {value}")
+
+CVScoresDT = cross_val_score(dtOptimized, X_train, y_train, cv=5)
+print(f"cross validation scores: {CVScoresDT}")
+print(f"avg cv score: {CVScoresDT.mean():.4f} (+/- {CVScoresDT.std() * 2:.4f})")
+
+yPredOptimized = dtOptimized.predict(X_test)
+OptimizedAccuracy = accuracy_score(y_test, yPredOptimized)
+print(f"optimized decision tree test accuracy: {OptimizedAccuracy:.4f} ({OptimizedAccuracy*100:.2f}%)")
+
+print("\nfeature importance (optimized tree):")
+for feature, importance in zip(X.columns, dtOptimized.feature_importances_):
+    if importance > 0:  
+        print(f"{feature:20s} | Importance: {importance:.4f}")
+
+print("optimized decision tree trained :)")
 
 #################################################################training random forest ###########################################################################
 print("\ntraining random forest:")

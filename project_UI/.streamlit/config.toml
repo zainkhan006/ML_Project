@@ -1,5 +1,5 @@
 [theme]
-primaryColor="#ed0c0cff"        # Main accent color (buttons, sliders)
-backgroundColor="#0b0c10"      # Background color
+primaryColor="#c5003c"        # Main accent color (buttons, sliders)
+backgroundColor="#00060e"      # Background color
 secondaryBackgroundColor="#24030356"  # Sidebar and widget backgrounds
 textColor="#FFEF00"           # Text color
