@@ -7,6 +7,9 @@ import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import GridSearchCV, cross_val_score
 from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import Perceptron, LinearRegression, Ridge, Lasso
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
 df = pd.read_csv('cleanedtrain.csv')
 print(f"dataset Shape: {df.shape}")  
@@ -29,7 +32,7 @@ print(f"deck before encoding: {df['Deck'].unique()}")
 df['Deck'] = df['Deck'].map({'M': 0, 'ABC': 1, 'DE': 2, 'FG': 3}).astype(int)
 print(f"deck after encoding: {df['Deck'].unique()}")
 
-#################################################3gini and entropy functions###########################################################################
+#################################################3 gini and entropy functions###########################################################################
 
 # target variable is survived
 # do not calculate gini or info gain(entropy) of Survived or PassengerID class
@@ -379,14 +382,191 @@ KNNAccuracy = accuracy_score(y_test, yPredKNN)
 print(f"KNN test accuracy: {KNNAccuracy:.4f} ({KNNAccuracy*100:.2f}%)")
 print("KNN trained :)")
 
+############################################################## Perceptron ########################################################################################
+print("\ntraining Perceptron:")
+
+gridParametersPerceptron = {
+    'penalty': [None, 'l2', 'l1', 'elasticnet'],
+    'alpha': [0.0001, 0.001, 0.01],
+    'max_iter': [1000],
+    'eta0': [0.1, 1.0]
+}
+
+basePerceptron = Perceptron(random_state=2025)
+gridSearchPerceptron = GridSearchCV(
+    estimator=basePerceptron,
+    param_grid=gridParametersPerceptron,
+    cv=5,
+    scoring='accuracy',
+    n_jobs=-1,
+    verbose=1
+)
+
+gridSearchPerceptron.fit(X_train, y_train)
+perceptronClassifier = gridSearchPerceptron.best_estimator_
+print("\nbest parameters:")
+for param, value in gridSearchPerceptron.best_params_.items():
+    print(f"{param}: {value}")
+
+CVScoresPerceptron = cross_val_score(perceptronClassifier, X_train, y_train, cv=5)
+print(f"cross validation scores: {CVScoresPerceptron}")
+print(f"avg cv score: {CVScoresPerceptron.mean():.4f} (+/- {CVScoresPerceptron.std() * 2:.4f})")
+
+yPredPerceptron = perceptronClassifier.predict(X_test)
+PerceptronAccuracy = accuracy_score(y_test, yPredPerceptron)
+print(f"Perceptron test accuracy: {PerceptronAccuracy:.4f} ({PerceptronAccuracy*100:.2f}%)")
+print("Perceptron trained :)")
+
+############################################################## Neural Network (MLP) ##############################################################################
+print("\ntraining Neural Network (MLP):")
+
+gridParametersMLP = {
+    'hidden_layer_sizes': [(50,), (100,), (50, 50)],
+    'activation': ['relu', 'tanh'],
+    'solver': ['adam'],
+    'alpha': [0.0001, 0.001],
+    'max_iter': [500]
+}
+
+baseMLP = MLPClassifier(random_state=2025)
+gridSearchMLP = GridSearchCV(
+    estimator=baseMLP,
+    param_grid=gridParametersMLP,
+    cv=5,
+    scoring='accuracy',
+    n_jobs=-1,
+    verbose=1
+)
+
+gridSearchMLP.fit(X_train, y_train)
+mlpClassifier = gridSearchMLP.best_estimator_
+print("\nbest parameters:")
+for param, value in gridSearchMLP.best_params_.items():
+    print(f"{param}: {value}")
+
+CVScoresMLP = cross_val_score(mlpClassifier, X_train, y_train, cv=5)
+print(f"cross validation scores: {CVScoresMLP}")
+print(f"avg cv score: {CVScoresMLP.mean():.4f} (+/- {CVScoresMLP.std() * 2:.4f})")
+
+yPredMLP = mlpClassifier.predict(X_test)
+MLPAccuracy = accuracy_score(y_test, yPredMLP)
+print(f"Neural Network (MLP) test accuracy: {MLPAccuracy:.4f} ({MLPAccuracy*100:.2f}%)")
+print("Neural Network (MLP) trained :)")
+
+############################################################## Linear Regression #################################################################################
+print("\ntraining Linear Regression:")
+
+linearReg = LinearRegression()
+linearReg.fit(X_train, y_train)
+
+yPredLinearReg = linearReg.predict(X_test)
+
+print(f"R-squared: {r2_score(y_test, yPredLinearReg):.4f}")
+print(f"Mean Squared Error: {mean_squared_error(y_test, yPredLinearReg):.4f}")
+print(f"Mean Absolute Error: {mean_absolute_error(y_test, yPredLinearReg):.4f}")
+
+yPredLinearRegBinary = (yPredLinearReg >= 0.5).astype(int)
+LinearRegAccuracy = accuracy_score(y_test, yPredLinearRegBinary)
+print(f"Linear Regression accuracy (threshold=0.5): {LinearRegAccuracy:.4f} ({LinearRegAccuracy*100:.2f}%)")
+
+CVScoresLinearReg = cross_val_score(linearReg, X_train, y_train, cv=5, scoring='r2')
+print(f"cross validation R2 scores: {CVScoresLinearReg}")
+print(f"avg cv R2 score: {CVScoresLinearReg.mean():.4f} (+/- {CVScoresLinearReg.std() * 2:.4f})")
+print("Linear Regression trained :)")
+
+############################################################## Ridge Regression ##################################################################################
+print("\ntraining Ridge Regression:")
+
+gridParametersRidge = {
+    'alpha': [0.01, 0.1, 1.0, 10.0, 100.0]
+}
+
+baseRidge = Ridge(random_state=2025)
+gridSearchRidge = GridSearchCV(
+    estimator=baseRidge,
+    param_grid=gridParametersRidge,
+    cv=5,
+    scoring='r2',
+    n_jobs=-1,
+    verbose=1
+)
+
+gridSearchRidge.fit(X_train, y_train)
+ridgeReg = gridSearchRidge.best_estimator_
+print("\nbest parameters:")
+for param, value in gridSearchRidge.best_params_.items():
+    print(f"{param}: {value}")
+
+yPredRidge = ridgeReg.predict(X_test)
+
+print(f"R-squared: {r2_score(y_test, yPredRidge):.4f}")
+print(f"Mean Squared Error: {mean_squared_error(y_test, yPredRidge):.4f}")
+print(f"Mean Absolute Error: {mean_absolute_error(y_test, yPredRidge):.4f}")
+
+yPredRidgeBinary = (yPredRidge >= 0.5).astype(int)
+RidgeAccuracy = accuracy_score(y_test, yPredRidgeBinary)
+print(f"Ridge Regression accuracy (threshold=0.5): {RidgeAccuracy:.4f} ({RidgeAccuracy*100:.2f}%)")
+
+CVScoresRidge = cross_val_score(ridgeReg, X_train, y_train, cv=5, scoring='r2')
+print(f"cross validation R2 scores: {CVScoresRidge}")
+print(f"avg cv R2 score: {CVScoresRidge.mean():.4f} (+/- {CVScoresRidge.std() * 2:.4f})")
+print("Ridge Regression trained :)")
+
+############################################################## Lasso Regression ##################################################################################
+print("\ntraining Lasso Regression:")
+
+gridParametersLasso = {
+    'alpha': [0.0001, 0.001, 0.01, 0.1],
+    'max_iter': [1000, 5000]
+}
+
+baseLasso = Lasso(random_state=2025)
+gridSearchLasso = GridSearchCV(
+    estimator=baseLasso,
+    param_grid=gridParametersLasso,
+    cv=5,
+    scoring='r2',
+    n_jobs=-1,
+    verbose=1
+)
+
+gridSearchLasso.fit(X_train, y_train)
+lassoReg = gridSearchLasso.best_estimator_
+print("\nbest parameters:")
+for param, value in gridSearchLasso.best_params_.items():
+    print(f"{param}: {value}")
+
+yPredLasso = lassoReg.predict(X_test)
+
+print(f"R-squared: {r2_score(y_test, yPredLasso):.4f}")
+print(f"Mean Squared Error: {mean_squared_error(y_test, yPredLasso):.4f}")
+print(f"Mean Absolute Error: {mean_absolute_error(y_test, yPredLasso):.4f}")
+
+yPredLassoBinary = (yPredLasso >= 0.5).astype(int)
+LassoAccuracy = accuracy_score(y_test, yPredLassoBinary)
+print(f"Lasso Regression accuracy (threshold=0.5): {LassoAccuracy:.4f} ({LassoAccuracy*100:.2f}%)")
+
+CVScoresLasso = cross_val_score(lassoReg, X_train, y_train, cv=5, scoring='r2')
+print(f"cross validation R2 scores: {CVScoresLasso}")
+print(f"avg cv R2 score: {CVScoresLasso.mean():.4f} (+/- {CVScoresLasso.std() * 2:.4f})")
+print("Lasso Regression trained :)")
+
 ################################################################summary####################################################################################
-print("summary of all models so far")
+print("\n summary of all classification models:")
 print(f"Decision Tree (Gini):      {GiniAccuracy:.4f} ({GiniAccuracy*100:.2f}%)")
 print(f"Decision Tree (Entropy):   {EntropyAccuracy:.4f} ({EntropyAccuracy*100:.2f}%)")
+print(f"Decision Tree (Optimized): {OptimizedAccuracy:.4f} ({OptimizedAccuracy*100:.2f}%)")
 print(f"Random Forest:             {RFAccuracy:.4f} ({RFAccuracy*100:.2f}%)")
 print(f"Logistic Regression:       {LRAccuracy:.4f} ({LRAccuracy*100:.2f}%)")
 print(f"SVM:                       {SVMAccuracy:.4f} ({SVMAccuracy*100:.2f}%)")
 print(f"KNN:                       {KNNAccuracy:.4f} ({KNNAccuracy*100:.2f}%)")
+print(f"Perceptron:                {PerceptronAccuracy:.4f} ({PerceptronAccuracy*100:.2f}%)")
+print(f"Neural Network (MLP):      {MLPAccuracy:.4f} ({MLPAccuracy*100:.2f}%)")
+
+print("\n summary of all regression models")
+print(f"Linear Regression:         {LinearRegAccuracy:.4f} ({LinearRegAccuracy*100:.2f}%)")
+print(f"Ridge Regression:          {RidgeAccuracy:.4f} ({RidgeAccuracy*100:.2f}%)")
+print(f"Lasso Regression:          {LassoAccuracy:.4f} ({LassoAccuracy*100:.2f}%)")
 
 ##################################################################### fin ##################################################################################
 print("\nmaking predictions on testing data:")
