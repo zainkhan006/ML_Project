@@ -1,8 +1,3 @@
-"""
-Training Visualizations Module for ML Learning Website
-Provides animated visualizations showing how each model learns step-by-step.
-"""
-
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -15,9 +10,7 @@ from matplotlib.patches import FancyBboxPatch, Circle
 import matplotlib.lines as mlines
 
 
-# ============================================================================
-# HELPER FUNCTIONS
-# ============================================================================
+################################ helper funcs ##########################################
 
 def reduce_to_2d(X, feature_names=None):
     """Reduces high-dimensional data to 2D using PCA for visualization."""
@@ -176,9 +169,13 @@ def visualize_linear_regression(model, X_train, y_train, feature_names):
     st.markdown("#### Linear Regression Training Animation")
     st.caption("Watch how the line adjusts to minimize error")
 
+    # Convert to numpy arrays if needed (fixes pandas indexing issues)
+    X_train_np = np.array(X_train) if not isinstance(X_train, np.ndarray) else X_train
+    y_train_np = np.array(y_train) if not isinstance(y_train, np.ndarray) else y_train
+
     # Get best feature for visualization
-    best_feat_idx = get_best_feature_index(X_train, y_train)
-    X_1d = X_train[:, best_feat_idx]
+    best_feat_idx = get_best_feature_index(X_train_np, y_train_np)
+    X_1d = X_train_np[:, best_feat_idx]
     feat_name = feature_names[best_feat_idx] if best_feat_idx < len(feature_names) else f"Feature {best_feat_idx}"
 
     # Get final coefficients
@@ -210,13 +207,13 @@ def visualize_linear_regression(model, X_train, y_train, feature_names):
         y_pred = current_slope * X_1d + current_intercept
 
         # Calculate MSE
-        mse = np.mean((y_train - y_pred) ** 2)
+        mse = np.mean((y_train_np - y_pred) ** 2)
 
         fig, ax = plt.subplots(figsize=(10, 6))
 
         # Plot data points
-        colors = ['#FF6B6B' if y == 0 else '#4ECDC4' for y in y_train]
-        ax.scatter(X_1d, y_train, c=colors, s=50, alpha=0.7, edgecolors='black', linewidth=0.5)
+        colors = ['#FF6B6B' if y == 0 else '#4ECDC4' for y in y_train_np]
+        ax.scatter(X_1d, y_train_np, c=colors, s=50, alpha=0.7, edgecolors='black', linewidth=0.5)
 
         # Plot regression line
         line_color = '#FFD700' if step < n_steps else '#32CD32'
@@ -227,7 +224,7 @@ def visualize_linear_regression(model, X_train, y_train, feature_names):
         if step > 0:
             sample_indices = np.random.choice(len(X_1d), min(20, len(X_1d)), replace=False)
             for idx in sample_indices:
-                ax.plot([X_1d[idx], X_1d[idx]], [y_train[idx], y_pred[idx]],
+                ax.plot([X_1d[idx], X_1d[idx]], [y_train_np[idx], y_pred[idx]],
                        'r--', alpha=0.3, linewidth=1)
 
         ax.set_xlabel(feat_name, fontsize=12)
@@ -1360,10 +1357,14 @@ def visualize_ridge_regression(model, X_train, y_train, feature_names, alpha):
     st.markdown("#### Ridge Regression (L2) Animation")
     st.caption("Watch how regularization shrinks coefficients toward zero")
 
+    # Convert to numpy arrays if needed (fixes pandas indexing issues)
+    X_train_np = np.array(X_train) if not isinstance(X_train, np.ndarray) else X_train
+    y_train_np = np.array(y_train) if not isinstance(y_train, np.ndarray) else y_train
+
     # Get OLS coefficients for comparison
     from sklearn.linear_model import LinearRegression
     ols = LinearRegression()
-    ols.fit(X_train, y_train)
+    ols.fit(X_train_np, y_train_np)
     ols_coefs = ols.coef_
 
     ridge_coefs = model.coef_
@@ -1454,10 +1455,14 @@ def visualize_lasso_regression(model, X_train, y_train, feature_names, alpha):
     st.markdown("#### Lasso Regression (L1) Animation")
     st.caption("Watch how L1 regularization eliminates features (coefficients become exactly zero)")
 
+    # Convert to numpy arrays if needed (fixes pandas indexing issues)
+    X_train_np = np.array(X_train) if not isinstance(X_train, np.ndarray) else X_train
+    y_train_np = np.array(y_train) if not isinstance(y_train, np.ndarray) else y_train
+
     # Get OLS coefficients for comparison
     from sklearn.linear_model import LinearRegression
     ols = LinearRegression()
-    ols.fit(X_train, y_train)
+    ols.fit(X_train_np, y_train_np)
     ols_coefs = ols.coef_
 
     lasso_coefs = model.coef_
