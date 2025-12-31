@@ -6,10 +6,13 @@ from sklearn.metrics import accuracy_score, confusion_matrix, classification_rep
 import matplotlib.pyplot as plt
 import seaborn as sns
 from preprocess import preprocessingData
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, VotingClassifier, VotingRegressor, StackingClassifier, StackingRegressor, BaggingClassifier, BaggingRegressor, AdaBoostClassifier, AdaBoostRegressor
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
 from sklearn.neighbors import KNeighborsClassifier
+from sklearn.linear_model import Perceptron, LinearRegression, Ridge, Lasso
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from hyperparameters import hyperparameters
 
 #################################################### initialisation #############################################################################################
@@ -219,6 +222,14 @@ if 'page' not in st.session_state:
     st.session_state.page = 'welcome'
 if 'problem_type' not in st.session_state:
     st.session_state.problem_type = None
+if 'engineered_features' not in st.session_state:
+    st.session_state.engineered_features = []  # List of {name, formula, values_train, values_test}
+if 'ensemble_results' not in st.session_state:
+    st.session_state.ensemble_results = []  # List of {name, method, models, train_accuracy, test_accuracy}
+if 'trained_models' not in st.session_state:
+    st.session_state.trained_models = {}  # {name: {model, train_accuracy, test_accuracy, hyperparams, problem_type}}
+if 'last_visualization' not in st.session_state:
+    st.session_state.last_visualization = None  # {model_type, model, X_train, y_train, features, hyperparams}
 
 def goToDatasetInfo():
     st.session_state.page = 'dataset_info'
@@ -508,7 +519,7 @@ elif st.session_state.page == 'problem_choice':
     Machine learning problems fall into different categories. For this dataset, we'll focus on:
     """)
     
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     
     with col1:
         st.markdown("""
@@ -535,27 +546,28 @@ elif st.session_state.page == 'problem_choice':
         """)
         
         st.button(
-            "Select →", 
+            "Select →",
             on_click=lambda: goToModels('classification'),
             type="primary",
-            use_container_width=True
+            use_container_width=True,
+            key="classification_select"
         )
-    
+
     with col2:
         st.markdown("""
         ### Regression
-        
+
         **Goal:** Predict continuous numerical values
-        
+
         **Example:** Predicting a passenger's age or ticket fare
-        
+
         **Status:** Coming soon
-        
+
         **Models:**
         - Linear regression
         - Ridge regression
         - Lasso regression
-                    
+
         **What you'll learn:**
         - Continuous value prediction
         - Mean squared error and R² score
@@ -563,81 +575,739 @@ elif st.session_state.page == 'problem_choice':
         - Feature scaling and it's importance
         - Handling outliers in predictions
         """)
-        
+
         st.button(
-            "Regression (Coming Soon)", 
-            disabled=True,
-            use_container_width=True
+            "Select →",
+            on_click=lambda: goToModels('regression'),
+            type="primary",
+            use_container_width=True,
+            key="regression_select"
         )
 
-    with col3:
-        st.markdown("""
-        ### Deep Learning
-        
-        **Goal:** Use artificial neurons to learn complex patterns
-        
-        **Status:** Coming Soon!
-        
-        **Models:**
-        - Perceptrons(simplest neurons)
-        - Neural networks
-                    
-        **What you'll learn:**
-        - How neural networks learn
-        - Activation functions (reLU, sigmoid, tanh)
-        - Backpropagation and gradient descent
-        - Network architecture design
-        - Learning rate tuning
-        - When deep learning helps (and when it doesn't)
-        - Comparing simple vs complex models
-        """)
-        
-        st.button(
-            "MLP", 
-            disabled=True,
-            use_container_width=True
-        )
+############################################################## FEATURE ENGINEERING DIALOG ##############################################################################
+@st.dialog("Feature Engineering", width="large")
+def featureEngineeringDialog():
+    # Load data for feature engineering
+    X_train, X_test, y_train, y_test, scaler, baseFeatures = preprocessingData()
+
+    # Convert to DataFrame for easier manipulation
+    X_train_df = pd.DataFrame(X_train, columns=baseFeatures)
+    X_test_df = pd.DataFrame(X_test, columns=baseFeatures)
+
+    st.markdown("Create new features to improve model accuracy")
+
+    # Main layout: two columns
+    leftCol, rightCol = st.columns([1, 2])
+
+    with leftCol:
+        st.markdown("### Current Features")
+
+        # Show base features
+        st.markdown("**Base Features:**")
+        for feature in baseFeatures:
+            st.markdown(f"- {feature}")
+
+        # Show engineered features
+        if st.session_state.engineered_features:
+            st.markdown("**Engineered Features:**")
+            for i, engFeature in enumerate(st.session_state.engineered_features):
+                featureCol1, featureCol2 = st.columns([3, 1])
+                with featureCol1:
+                    st.markdown(f"✨ **{engFeature['name']}**")
+                    st.caption(f"Formula: {engFeature['formula']}")
+                with featureCol2:
+                    if st.button("🗑️", key=f"dialog_remove_{i}", help="Remove this feature"):
+                        st.session_state.engineered_features.pop(i)
+                        st.rerun()
+
+        st.divider()
+
+        # Feature count summary
+        totalFeatures = len(baseFeatures) + len(st.session_state.engineered_features)
+        st.metric("Total Features", totalFeatures)
+
+    with rightCol:
+        st.markdown("### Create New Feature")
+
+        # Tabs for different operation types
+        tab1, tab2, tab3, tab4 = st.tabs(["Arithmetic", "Presets", "Transform", "Polynomial"])
+
+        allFeatures = baseFeatures + [f['name'] for f in st.session_state.engineered_features]
+
+        ############################################################## Arithmetic Tab ##############################################################################
+        with tab1:
+            with st.popover("ℹ️ What is Arithmetic?"):
+                st.markdown("**Arithmetic Operations**")
+                st.write("Combine two features using basic math operations (+, -, ×, ÷). This can reveal relationships between features.")
+                st.write("**Example:** Age × Pclass might show that older passengers in lower classes had different survival rates.")
+
+            arithmeticCol1, arithmeticCol2, arithmeticCol3 = st.columns(3)
+
+            with arithmeticCol1:
+                feature1 = st.selectbox("Feature 1", allFeatures, key="dialog_arith_f1")
+            with arithmeticCol2:
+                operation = st.selectbox("Operation", ["Add (+)", "Subtract (-)", "Multiply (×)", "Divide (÷)"], key="dialog_arith_op")
+            with arithmeticCol3:
+                feature2 = st.selectbox("Feature 2", allFeatures, key="dialog_arith_f2")
+
+            # Auto-generate name
+            opSymbols = {"Add (+)": "+", "Subtract (-)": "-", "Multiply (×)": "×", "Divide (÷)": "÷"}
+            defaultName = f"{feature1}_{opSymbols[operation]}_{feature2}"
+            arithmeticName = st.text_input("Feature Name", value=defaultName, key="dialog_arith_name")
+
+            if st.button("Create Feature", key="dialog_create_arith", type="primary"):
+                # Get values
+                if feature1 in baseFeatures:
+                    vals1_train = X_train_df[feature1].values
+                    vals1_test = X_test_df[feature1].values
+                else:
+                    engF = next(f for f in st.session_state.engineered_features if f['name'] == feature1)
+                    vals1_train = engF['values_train']
+                    vals1_test = engF['values_test']
+
+                if feature2 in baseFeatures:
+                    vals2_train = X_train_df[feature2].values
+                    vals2_test = X_test_df[feature2].values
+                else:
+                    engF = next(f for f in st.session_state.engineered_features if f['name'] == feature2)
+                    vals2_train = engF['values_train']
+                    vals2_test = engF['values_test']
+
+                # Apply operation
+                if operation == "Add (+)":
+                    newValsTrain = vals1_train + vals2_train
+                    newValsTest = vals1_test + vals2_test
+                elif operation == "Subtract (-)":
+                    newValsTrain = vals1_train - vals2_train
+                    newValsTest = vals1_test - vals2_test
+                elif operation == "Multiply (×)":
+                    newValsTrain = vals1_train * vals2_train
+                    newValsTest = vals1_test * vals2_test
+                else:  # Divide
+                    newValsTrain = vals1_train / (vals2_train + 0.001)
+                    newValsTest = vals1_test / (vals2_test + 0.001)
+
+                # Add to session state
+                st.session_state.engineered_features.append({
+                    'name': arithmeticName,
+                    'formula': f"{feature1} {opSymbols[operation]} {feature2}",
+                    'values_train': newValsTrain,
+                    'values_test': newValsTest
+                })
+                st.success(f"Created feature: {arithmeticName}")
+                st.rerun()
+
+        ############################################################## Presets Tab ##############################################################################
+        with tab2:
+            with st.popover("ℹ️ What are Presets?"):
+                st.markdown("**Preset Feature Combinations**")
+                st.write("These are commonly used feature combinations for the Titanic dataset that have been proven to improve model performance.")
+                st.write("**Why they work:** Domain knowledge about the Titanic disaster suggests these combinations capture important survival factors.")
+
+            presets = {
+                'FamilySize': {
+                    'formula': 'SibSp + Parch + 1',
+                    'description': 'Total family members including the passenger. Larger families may have had different survival rates.',
+                    'calc_train': X_train_df['SibSp'].values + X_train_df['Parch'].values + 1,
+                    'calc_test': X_test_df['SibSp'].values + X_test_df['Parch'].values + 1
+                },
+                'IsAlone': {
+                    'formula': '1 if (SibSp + Parch) == 0 else 0',
+                    'description': 'Whether passenger is traveling alone. Solo travelers may have had different survival chances.',
+                    'calc_train': ((X_train_df['SibSp'].values + X_train_df['Parch'].values) == 0).astype(int),
+                    'calc_test': ((X_test_df['SibSp'].values + X_test_df['Parch'].values) == 0).astype(int)
+                },
+                'AgeClass': {
+                    'formula': 'Age × Pclass',
+                    'description': 'Interaction between age and class. Young first-class passengers vs old third-class passengers.',
+                    'calc_train': X_train_df['Age'].values * X_train_df['Pclass'].values,
+                    'calc_test': X_test_df['Age'].values * X_test_df['Pclass'].values
+                },
+                'FarePerPerson': {
+                    'formula': 'Fare ÷ (SibSp + Parch + 1)',
+                    'description': 'Fare adjusted for family size. Shows actual spending power per person.',
+                    'calc_train': X_train_df['Fare'].values / (X_train_df['SibSp'].values + X_train_df['Parch'].values + 1),
+                    'calc_test': X_test_df['Fare'].values / (X_test_df['SibSp'].values + X_test_df['Parch'].values + 1)
+                }
+            }
+
+            # Check which presets are already created
+            existingNames = [f['name'] for f in st.session_state.engineered_features]
+
+            for presetName, presetInfo in presets.items():
+                presetCol1, presetCol2 = st.columns([3, 1])
+                with presetCol1:
+                    st.markdown(f"**{presetName}**")
+                    st.caption(f"Formula: {presetInfo['formula']}")
+                    st.caption(presetInfo['description'])
+                with presetCol2:
+                    if presetName in existingNames:
+                        st.success("Added ✓")
+                    else:
+                        if st.button("Add", key=f"dialog_preset_{presetName}"):
+                            st.session_state.engineered_features.append({
+                                'name': presetName,
+                                'formula': presetInfo['formula'],
+                                'values_train': presetInfo['calc_train'],
+                                'values_test': presetInfo['calc_test']
+                            })
+                            st.rerun()
+                st.divider()
+
+        ############################################################## Transform Tab ##############################################################################
+        with tab3:
+            with st.popover("ℹ️ What are Transformations?"):
+                st.markdown("**Feature Transformations**")
+                st.write("Apply mathematical transformations to a single feature. This can help with:")
+                st.write("- **Log:** Reduces impact of outliers, good for skewed distributions")
+                st.write("- **Square Root:** Milder than log, also handles skew")
+                st.write("- **Square:** Emphasizes larger values")
+                st.write("- **Binning:** Groups continuous values into categories")
+
+            transformFeature = st.selectbox("Select Feature to Transform", allFeatures, key="dialog_transform_feature")
+
+            transformType = st.selectbox("Transformation Type", [
+                "Log (log1p)",
+                "Square Root",
+                "Square",
+                "Bin (3 groups)",
+                "Bin (5 groups)"
+            ], key="dialog_transform_type")
+
+            # Auto-generate name
+            transformSuffixes = {
+                "Log (log1p)": "_log",
+                "Square Root": "_sqrt",
+                "Square": "_sq",
+                "Bin (3 groups)": "_bin3",
+                "Bin (5 groups)": "_bin5"
+            }
+            transformDefaultName = f"{transformFeature}{transformSuffixes[transformType]}"
+            transformName = st.text_input("Feature Name", value=transformDefaultName, key="dialog_transform_name")
+
+            if st.button("Create Feature", key="dialog_create_transform", type="primary"):
+                # Get values
+                if transformFeature in baseFeatures:
+                    valsToTransformTrain = X_train_df[transformFeature].values
+                    valsToTransformTest = X_test_df[transformFeature].values
+                else:
+                    engF = next(f for f in st.session_state.engineered_features if f['name'] == transformFeature)
+                    valsToTransformTrain = engF['values_train']
+                    valsToTransformTest = engF['values_test']
+
+                # Apply transformation
+                if transformType == "Log (log1p)":
+                    newValsTrain = np.log1p(np.abs(valsToTransformTrain))
+                    newValsTest = np.log1p(np.abs(valsToTransformTest))
+                    formula = f"log(1 + |{transformFeature}|)"
+                elif transformType == "Square Root":
+                    newValsTrain = np.sqrt(np.abs(valsToTransformTrain))
+                    newValsTest = np.sqrt(np.abs(valsToTransformTest))
+                    formula = f"sqrt(|{transformFeature}|)"
+                elif transformType == "Square":
+                    newValsTrain = valsToTransformTrain ** 2
+                    newValsTest = valsToTransformTest ** 2
+                    formula = f"{transformFeature}²"
+                elif transformType == "Bin (3 groups)":
+                    try:
+                        newValsTrain = pd.qcut(valsToTransformTrain, 3, labels=[0, 1, 2], duplicates='drop').astype(float).values
+                        newValsTest = pd.cut(valsToTransformTest, bins=3, labels=[0, 1, 2]).astype(float).values
+                    except:
+                        newValsTrain = pd.cut(valsToTransformTrain, bins=3, labels=[0, 1, 2]).astype(float).values
+                        newValsTest = pd.cut(valsToTransformTest, bins=3, labels=[0, 1, 2]).astype(float).values
+                    formula = f"bin({transformFeature}, 3 groups)"
+                else:  # Bin 5 groups
+                    try:
+                        newValsTrain = pd.qcut(valsToTransformTrain, 5, labels=[0, 1, 2, 3, 4], duplicates='drop').astype(float).values
+                        newValsTest = pd.cut(valsToTransformTest, bins=5, labels=[0, 1, 2, 3, 4]).astype(float).values
+                    except:
+                        newValsTrain = pd.cut(valsToTransformTrain, bins=5, labels=[0, 1, 2, 3, 4]).astype(float).values
+                        newValsTest = pd.cut(valsToTransformTest, bins=5, labels=[0, 1, 2, 3, 4]).astype(float).values
+                    formula = f"bin({transformFeature}, 5 groups)"
+
+                # Handle NaN values
+                newValsTrain = np.nan_to_num(newValsTrain, nan=0.0)
+                newValsTest = np.nan_to_num(newValsTest, nan=0.0)
+
+                st.session_state.engineered_features.append({
+                    'name': transformName,
+                    'formula': formula,
+                    'values_train': newValsTrain,
+                    'values_test': newValsTest
+                })
+                st.success(f"Created feature: {transformName}")
+                st.rerun()
+
+        ############################################################## Polynomial Tab ##############################################################################
+        with tab4:
+            with st.popover("ℹ️ What are Polynomial Features?"):
+                st.markdown("**Polynomial Features**")
+                st.write("Creates polynomial combinations of selected features. For two features A and B, this generates:")
+                st.write("- A² (A squared)")
+                st.write("- B² (B squared)")
+                st.write("- A×B (interaction term)")
+                st.write("**When to use:** When you suspect non-linear relationships between features and the target.")
+
+            polyCol1, polyCol2 = st.columns(2)
+            with polyCol1:
+                polyFeature1 = st.selectbox("Feature 1", allFeatures, key="dialog_poly_f1")
+            with polyCol2:
+                polyFeature2 = st.selectbox("Feature 2", allFeatures, key="dialog_poly_f2", index=min(1, len(allFeatures)-1))
+
+            if st.button("Generate Polynomial Features", key="dialog_create_poly", type="primary"):
+                # Get values
+                if polyFeature1 in baseFeatures:
+                    polyVals1Train = X_train_df[polyFeature1].values
+                    polyVals1Test = X_test_df[polyFeature1].values
+                else:
+                    engF = next(f for f in st.session_state.engineered_features if f['name'] == polyFeature1)
+                    polyVals1Train = engF['values_train']
+                    polyVals1Test = engF['values_test']
+
+                if polyFeature2 in baseFeatures:
+                    polyVals2Train = X_train_df[polyFeature2].values
+                    polyVals2Test = X_test_df[polyFeature2].values
+                else:
+                    engF = next(f for f in st.session_state.engineered_features if f['name'] == polyFeature2)
+                    polyVals2Train = engF['values_train']
+                    polyVals2Test = engF['values_test']
+
+                # Create polynomial features
+                polyFeaturesList = [
+                    {
+                        'name': f"{polyFeature1}_squared",
+                        'formula': f"{polyFeature1}²",
+                        'values_train': polyVals1Train ** 2,
+                        'values_test': polyVals1Test ** 2
+                    },
+                    {
+                        'name': f"{polyFeature2}_squared",
+                        'formula': f"{polyFeature2}²",
+                        'values_train': polyVals2Train ** 2,
+                        'values_test': polyVals2Test ** 2
+                    },
+                    {
+                        'name': f"{polyFeature1}_{polyFeature2}_interaction",
+                        'formula': f"{polyFeature1} × {polyFeature2}",
+                        'values_train': polyVals1Train * polyVals2Train,
+                        'values_test': polyVals1Test * polyVals2Test
+                    }
+                ]
+
+                # Add only features that don't already exist
+                existingNames = [f['name'] for f in st.session_state.engineered_features]
+                addedCount = 0
+                for polyF in polyFeaturesList:
+                    if polyF['name'] not in existingNames:
+                        st.session_state.engineered_features.append(polyF)
+                        addedCount += 1
+
+                if addedCount > 0:
+                    st.success(f"Added {addedCount} polynomial features!")
+                    st.rerun()
+                else:
+                    st.info("All polynomial features already exist.")
+
+    st.divider()
+
+    # Preview section
+    if st.session_state.engineered_features:
+        st.markdown("### Feature Preview")
+        previewData = X_train_df.copy()
+        for engFeature in st.session_state.engineered_features:
+            previewData[engFeature['name']] = engFeature['values_train']
+        st.dataframe(previewData.head(5), use_container_width=True)
+
+    # Done button
+    if st.button("Done", type="primary", use_container_width=True):
+        st.rerun()
+
+############################################################## MODEL FACTORY FUNCTIONS ##############################################################################
+def getClassificationModel(name):
+    """Returns a classification model with default hyperparameters"""
+    models = {
+        "Decision Tree": DecisionTreeClassifier(max_depth=5, random_state=42),
+        "Random Forest": RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42),
+        "Logistic Regression": LogisticRegression(max_iter=1000, random_state=42),
+        "SVM": SVC(probability=True, random_state=42),
+        "KNN": KNeighborsClassifier(n_neighbors=5),
+        "Perceptron": Perceptron(max_iter=1000, random_state=42),
+        "Neural Network": MLPClassifier(hidden_layer_sizes=(100,), max_iter=500, random_state=42)
+    }
+    return models.get(name)
+
+def getRegressionModel(name):
+    """Returns a regression model with default hyperparameters"""
+    models = {
+        "Linear Regression": LinearRegression(),
+        "Ridge Regression": Ridge(alpha=1.0),
+        "Lasso Regression": Lasso(alpha=0.01, max_iter=5000)
+    }
+    return models.get(name)
+
+############################################################## TRAINING VISUALIZATION DIALOG ##############################################################################
+@st.dialog("Training Visualization", width="large")
+def trainingVisualizationDialog():
+    """Shows animated training visualization for the last trained model"""
+    from training_visualizations import (
+        visualize_decision_tree, visualize_random_forest, visualize_logistic_regression,
+        visualize_svm, visualize_knn, visualize_perceptron, visualize_neural_network,
+        visualize_linear_regression, visualize_ridge_regression, visualize_lasso_regression
+    )
+
+    vizData = st.session_state.last_visualization
+
+    if vizData is None:
+        st.warning("No model has been trained yet. Train a model first to see the visualization.")
+        return
+
+    modelType = vizData['model_type']
+    model = vizData['model']
+    X_train = vizData['X_train']
+    y_train = vizData['y_train']
+    features = vizData['features']
+    hyperparams = vizData['hyperparams']
+
+    st.markdown(f"### {modelType} Training Animation")
+    st.caption("Watch how the model learns from the training data step by step")
+
+    # Call appropriate visualization based on model type
+    if modelType == "Decision Tree":
+        visualize_decision_tree(model, X_train, y_train, features, hyperparams['max_depth'])
+    elif modelType == "Random Forest":
+        visualize_random_forest(model, X_train, y_train, features, hyperparams['n_estimators'], hyperparams['max_depth'])
+    elif modelType == "Logistic Regression":
+        visualize_logistic_regression(model, X_train, y_train, features, hyperparams['C'])
+    elif modelType == "SVM":
+        visualize_svm(model, X_train, y_train, features, hyperparams['C'], hyperparams['kernel'])
+    elif modelType == "KNN":
+        visualize_knn(model, X_train, y_train, features, hyperparams['n_neighbors'])
+    elif modelType == "Perceptron":
+        visualize_perceptron(model, X_train, y_train, features, hyperparams['max_iter'], hyperparams['eta0'])
+    elif modelType == "Neural Network":
+        visualize_neural_network(model, X_train, y_train, hyperparams['hidden_layer_sizes'], hyperparams['activation'], hyperparams['max_iter'])
+    elif modelType == "Linear Regression":
+        visualize_linear_regression(model, X_train, y_train, features)
+    elif modelType == "Ridge Regression":
+        visualize_ridge_regression(model, X_train, y_train, features, hyperparams['alpha'])
+    elif modelType == "Lasso Regression":
+        visualize_lasso_regression(model, X_train, y_train, features, hyperparams['alpha'])
+
+############################################################## ENSEMBLE LEARNING DIALOG ##############################################################################
+@st.dialog("Ensemble Learning", width="large")
+def ensembleLearningDialog():
+    # Load data
+    X_train_base, X_test_base, y_train, y_test, scaler, baseFeatures = preprocessingData()
+
+    # Convert to DataFrame and add engineered features
+    X_train_df = pd.DataFrame(X_train_base, columns=baseFeatures)
+    X_test_df = pd.DataFrame(X_test_base, columns=baseFeatures)
+
+    for engFeature in st.session_state.engineered_features:
+        X_train_df[engFeature['name']] = engFeature['values_train']
+        X_test_df[engFeature['name']] = engFeature['values_test']
+
+    X_train = X_train_df.values
+    X_test = X_test_df.values
+
+    st.markdown("Combine your trained models into a powerful ensemble")
+
+    # Filter saved models by current problem type
+    availableModels = {
+        name: info for name, info in st.session_state.trained_models.items()
+        if info['problem_type'] == st.session_state.problem_type
+    }
+
+    if not availableModels:
+        st.warning("No trained models yet! Train some models first using the sidebar, then come back to create an ensemble.")
+        st.info("Each time you train a model, it gets saved automatically. You can then combine multiple saved models here.")
+        if st.button("Close", type="primary", use_container_width=True):
+            st.rerun()
+        return
+
+    # Two-column layout
+    leftCol, rightCol = st.columns([1, 2])
+
+    with leftCol:
+        st.markdown("### Saved Models")
+        st.caption("Select 2+ models to combine")
+
+        selectedModelNames = []
+        for modelName, modelInfo in availableModels.items():
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                if st.checkbox(modelName, key=f"ensemble_select_{modelName}"):
+                    selectedModelNames.append(modelName)
+            with col2:
+                st.caption(f"{modelInfo['test_accuracy']:.1%}")
+
+        st.divider()
+        st.metric("Selected", f"{len(selectedModelNames)} models")
+
+        if len(selectedModelNames) < 2:
+            st.warning("Select at least 2 models")
+
+        # Clear saved models option
+        with st.expander("Manage Saved Models"):
+            if st.button("Clear All Saved Models", type="secondary"):
+                st.session_state.trained_models = {}
+                st.rerun()
+
+    with rightCol:
+        st.markdown("### Configure Ensemble")
+
+        # Ensemble method selection based on problem type
+        if st.session_state.problem_type == 'classification':
+            method = st.selectbox("Ensemble Method", [
+                "Voting (Hard)", "Voting (Soft)", "Stacking", "Bagging", "AdaBoost"
+            ], key="ensemble_method")
+        else:
+            method = st.selectbox("Ensemble Method", [
+                "Voting (Average)", "Stacking", "Bagging", "AdaBoost"
+            ], key="ensemble_method")
+
+        # Info popover explaining each method
+        with st.popover("ℹ️ What is this method?"):
+            if "Voting" in method:
+                st.markdown("**Voting Ensemble**")
+                st.write("Each model makes a prediction, and the final result is determined by majority vote (hard) or averaged probabilities (soft).")
+                st.write("**Best for:** Combining diverse models that make different types of errors.")
+            elif method == "Stacking":
+                st.markdown("**Stacking Ensemble**")
+                st.write("A meta-model learns to combine base model predictions. Uses clones of your saved models.")
+                st.write("**Best for:** When you want the ensemble to learn optimal model weights.")
+            elif method == "Bagging":
+                st.markdown("**Bagging Ensemble**")
+                st.write("Trains multiple copies of the first selected model on random data subsets. Reduces variance.")
+                st.write("**Best for:** Reducing overfitting of unstable models like Decision Trees.")
+            elif method == "AdaBoost":
+                st.markdown("**AdaBoost Ensemble**")
+                st.write("Sequentially trains models, focusing on mistakes from previous models.")
+                st.write("**Best for:** Boosting weak learners into strong ones.")
+
+        # Custom name input
+        defaultName = f"Ensemble_{len(st.session_state.ensemble_results) + 1}"
+        ensembleName = st.text_input("Ensemble Name", value=defaultName, key="ensemble_name")
+
+        st.divider()
+
+        # Train button
+        trainDisabled = len(selectedModelNames) < 2
+        if st.button("Train Ensemble", type="primary", disabled=trainDisabled, use_container_width=True):
+            with st.spinner(f"Training {method} ensemble with your saved models..."):
+                try:
+                    # Get trained model objects
+                    from sklearn.base import clone
+
+                    if st.session_state.problem_type == 'classification':
+                        # Build estimators list using saved models (cloned for refitting)
+                        estimators = [
+                            (name.lower().replace(" ", "_").replace("(", "").replace(")", "").replace("=", ""),
+                             clone(st.session_state.trained_models[name]['model']))
+                            for name in selectedModelNames
+                        ]
+
+                        # Create ensemble based on method
+                        if method == "Voting (Hard)":
+                            ensemble = VotingClassifier(estimators=estimators, voting='hard')
+                        elif method == "Voting (Soft)":
+                            ensemble = VotingClassifier(estimators=estimators, voting='soft')
+                        elif method == "Stacking":
+                            ensemble = StackingClassifier(estimators=estimators, final_estimator=LogisticRegression(), cv=3)
+                        elif method == "Bagging":
+                            baseModel = clone(st.session_state.trained_models[selectedModelNames[0]]['model'])
+                            ensemble = BaggingClassifier(estimator=baseModel, n_estimators=10, random_state=42)
+                        elif method == "AdaBoost":
+                            baseModel = clone(st.session_state.trained_models[selectedModelNames[0]]['model'])
+                            ensemble = AdaBoostClassifier(estimator=baseModel, n_estimators=50, random_state=42, algorithm='SAMME')
+
+                        # Train
+                        ensemble.fit(X_train, y_train)
+
+                        # Evaluate
+                        trainAcc = accuracy_score(y_train, ensemble.predict(X_train))
+                        testAcc = accuracy_score(y_test, ensemble.predict(X_test))
+
+                        # Store results
+                        st.session_state.ensemble_results.append({
+                            'name': ensembleName,
+                            'method': method,
+                            'models': selectedModelNames.copy(),
+                            'train_accuracy': trainAcc,
+                            'test_accuracy': testAcc,
+                            'problem_type': 'classification'
+                        })
+
+                    else:  # Regression
+                        estimators = [
+                            (name.lower().replace(" ", "_").replace("(", "").replace(")", "").replace("=", ""),
+                             clone(st.session_state.trained_models[name]['model']))
+                            for name in selectedModelNames
+                        ]
+
+                        if method == "Voting (Average)":
+                            ensemble = VotingRegressor(estimators=estimators)
+                        elif method == "Stacking":
+                            ensemble = StackingRegressor(estimators=estimators, final_estimator=Ridge(), cv=3)
+                        elif method == "Bagging":
+                            baseModel = clone(st.session_state.trained_models[selectedModelNames[0]]['model'])
+                            ensemble = BaggingRegressor(estimator=baseModel, n_estimators=10, random_state=42)
+                        elif method == "AdaBoost":
+                            baseModel = clone(st.session_state.trained_models[selectedModelNames[0]]['model'])
+                            ensemble = AdaBoostRegressor(estimator=baseModel, n_estimators=50, random_state=42)
+
+                        # Train
+                        ensemble.fit(X_train, y_train)
+
+                        # Evaluate with threshold for classification accuracy
+                        yTrainPred = ensemble.predict(X_train)
+                        yTestPred = ensemble.predict(X_test)
+
+                        yTrainPredBinary = (yTrainPred >= 0.5).astype(int)
+                        yTestPredBinary = (yTestPred >= 0.5).astype(int)
+
+                        trainAcc = accuracy_score(y_train, yTrainPredBinary)
+                        testAcc = accuracy_score(y_test, yTestPredBinary)
+
+                        r2Train = r2_score(y_train, yTrainPred)
+                        r2Test = r2_score(y_test, yTestPred)
+
+                        st.session_state.ensemble_results.append({
+                            'name': ensembleName,
+                            'method': method,
+                            'models': selectedModelNames.copy(),
+                            'train_accuracy': trainAcc,
+                            'test_accuracy': testAcc,
+                            'r2_train': r2Train,
+                            'r2_test': r2Test,
+                            'problem_type': 'regression'
+                        })
+
+                    st.success(f"Ensemble '{ensembleName}' trained! Test Accuracy: {testAcc:.2%}")
+                    st.rerun()
+
+                except Exception as e:
+                    st.error(f"Error training ensemble: {str(e)}")
+
+    # Show trained ensembles
+    if st.session_state.ensemble_results:
+        st.divider()
+        st.markdown("### Trained Ensembles")
+
+        for i, result in enumerate(st.session_state.ensemble_results):
+            resultCol1, resultCol2 = st.columns([4, 1])
+            with resultCol1:
+                st.markdown(f"**{result['name']}** ({result['method']})")
+                st.caption(f"Models: {', '.join(result['models'])}")
+                col1, col2 = st.columns(2)
+                col1.metric("Train Accuracy", f"{result['train_accuracy']:.2%}")
+                col2.metric("Test Accuracy", f"{result['test_accuracy']:.2%}")
+            with resultCol2:
+                if st.button("🗑️", key=f"delete_ensemble_{i}", help="Delete this ensemble"):
+                    st.session_state.ensemble_results.pop(i)
+                    st.rerun()
+            st.divider()
+
+    # Done button
+    if st.button("Done", type="primary", use_container_width=True, key="ensemble_done"):
+        st.rerun()
 
 # ==================== PAGE 4: MODELS INTERFACE ====================
-elif st.session_state.page == 'models':
+if st.session_state.page == 'models':
     # Load data (cached)
     @st.cache_data
     def get_data():
         return preprocessingData()
-    
-    X_train, X_test, y_train, y_test, scaler, features = get_data()
-    
-    # Title with back button
-    col1, col2 = st.columns([4, 1])
+
+    X_train_base, X_test_base, y_train, y_test, scaler, features = get_data()
+
+    # Convert to DataFrame and add engineered features
+    X_train_df = pd.DataFrame(X_train_base, columns=features)
+    X_test_df = pd.DataFrame(X_test_base, columns=features)
+
+    # Add engineered features from session state
+    engineeredFeatureNames = []
+    for engFeature in st.session_state.engineered_features:
+        X_train_df[engFeature['name']] = engFeature['values_train']
+        X_test_df[engFeature['name']] = engFeature['values_test']
+        engineeredFeatureNames.append(engFeature['name'])
+
+    # Update features list
+    features = list(X_train_df.columns)
+
+    # Convert back to numpy arrays for model training
+    X_train = X_train_df.values
+    X_test = X_test_df.values
+
+    # Title with feature engineering, ensemble, visualize, and back buttons
+    col1, col2, col3, col4, col5 = st.columns([4, 1, 1, 1, 1])
     with col1:
-        st.title("🚢 Titanic Survival Prediction - Classification Models")
+        if st.session_state.problem_type == 'classification':
+            st.title("🚢 Titanic Survival Prediction - Classification Models")
+        else:
+            st.title("🚢 Titanic Survival Prediction - Regression Models")
     with col2:
-        if st.button("← Back to Start"):
+        if st.button("✨ Features", help="Open Feature Engineering"):
+            featureEngineeringDialog()
+    with col3:
+        if st.button("🔗 Ensemble", help="Combine multiple models"):
+            ensembleLearningDialog()
+    with col4:
+        if st.button("📊 Visualize", help="Watch training animation"):
+            trainingVisualizationDialog()
+    with col5:
+        if st.button("← Back"):
             st.session_state.page = 'welcome'
             st.rerun()
-    
-    st.markdown("Experiment with different models and hyperparameters to maximize prediction accuracy!")
-    
+
+    if st.session_state.problem_type == 'classification':
+        st.markdown("Experiment with different models and hyperparameters to maximize prediction accuracy!")
+    else:
+        st.markdown("Experiment with different regression models to predict survival probability!")
+
     # Display dataset statistics
-    col1, col2, col3 = st.columns(3)
+    # Count saved models for current problem type
+    savedModelsCount = len([m for m in st.session_state.trained_models.values() if m['problem_type'] == st.session_state.problem_type])
+
+    col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("Total Passengers", len(X_train) + len(X_test))
     col2.metric("Training Samples", len(X_train))
     col3.metric("Test Samples", len(X_test))
-    
+    col4.metric("Features", len(features), delta=f"+{len(engineeredFeatureNames)} engineered" if engineeredFeatureNames else None)
+    col5.metric("Saved Models", savedModelsCount, help="Models available for ensemble")
+
+    # Show engineered features if any
+    if engineeredFeatureNames:
+        with st.expander(f"✨ Engineered Features ({len(engineeredFeatureNames)})"):
+            for engFeature in st.session_state.engineered_features:
+                st.markdown(f"- **{engFeature['name']}**: {engFeature['formula']}")
+
+    # Show ensemble results if any
+    if st.session_state.ensemble_results:
+        with st.expander(f"🔗 Ensemble Models ({len(st.session_state.ensemble_results)})"):
+            for result in st.session_state.ensemble_results:
+                if result.get('problem_type') == st.session_state.problem_type:
+                    st.markdown(f"**{result['name']}** - {result['method']}")
+                    st.caption(f"Models: {', '.join(result['models'])}")
+                    metricCol1, metricCol2 = st.columns(2)
+                    metricCol1.metric("Train Accuracy", f"{result['train_accuracy']:.2%}")
+                    metricCol2.metric("Test Accuracy", f"{result['test_accuracy']:.2%}")
+                    st.divider()
+
     st.divider()
-    
+
     # Sidebar for model selection (ONLY classification models)
     st.sidebar.title("🎛️ Model Configuration")
     
     if st.session_state.problem_type == 'classification':
         model_choice = st.sidebar.selectbox(
             "Select Classification Model",
-            ["Decision Tree", "Random Forest", "Logistic Regression", "SVM", "KNN"]
+            ["Decision Tree", "Random Forest", "Logistic Regression", "SVM", "KNN", "Perceptron", "Neural Network"]
         )
-    else:  # For future regression
+    else:  # Regression
         model_choice = st.sidebar.selectbox(
             "Select Regression Model",
-            ["Linear Regression", "Ridge Regression"]  # Placeholder
+            ["Linear Regression", "Ridge Regression", "Lasso Regression"]
         )
 
 ######################################################### including dt #########################################################################################
@@ -689,10 +1359,30 @@ elif st.session_state.page == 'models':
                 testingAccuracy = accuracy_score(y_test, yTestPred)
                 accuracyGap = trainingAccuracy - testingAccuracy
                 
-                st.success("Model trained successfully!")
+                # Save model for ensemble
+                modelName = f"Decision Tree (depth={maxDepth})"
+                st.session_state.trained_models[modelName] = {
+                    'model': dtModel,
+                    'train_accuracy': trainingAccuracy,
+                    'test_accuracy': testingAccuracy,
+                    'hyperparams': {'max_depth': maxDepth, 'min_samples_split': minSamplesSplit, 'criterion': criterion},
+                    'problem_type': 'classification'
+                }
+
+                # Save visualization data
+                st.session_state.last_visualization = {
+                    'model_type': 'Decision Tree',
+                    'model': dtModel,
+                    'X_train': X_train,
+                    'y_train': y_train,
+                    'features': features,
+                    'hyperparams': {'max_depth': maxDepth}
+                }
+
+                st.success(f"Model trained and saved! Ready for ensemble. Click 📊 Visualize button to see training animation.")
                 st.markdown("### Model Performance:")
                 c1, c2, c3 = st.columns(3)
-                
+
                 c1.metric(
                     "Training Accuracy",
                     f"{trainingAccuracy:.2%}",
@@ -880,11 +1570,31 @@ elif st.session_state.page == 'models':
                 trainingAccuracy = accuracy_score(y_train, yTrainPred)
                 testingAccuracy = accuracy_score(y_test, yTestPred)
                 accuracyGap = trainingAccuracy - testingAccuracy
-                
-                st.success("Model trained successfully!")
+
+                # Save model for ensemble
+                modelName = f"Random Forest (n={n_estimators})"
+                st.session_state.trained_models[modelName] = {
+                    'model': rfModel,
+                    'train_accuracy': trainingAccuracy,
+                    'test_accuracy': testingAccuracy,
+                    'hyperparams': {'n_estimators': n_estimators, 'max_depth': maxDepth, 'criterion': criterion},
+                    'problem_type': 'classification'
+                }
+
+                # Save visualization data
+                st.session_state.last_visualization = {
+                    'model_type': 'Random Forest',
+                    'model': rfModel,
+                    'X_train': X_train,
+                    'y_train': y_train,
+                    'features': features,
+                    'hyperparams': {'n_estimators': n_estimators, 'max_depth': maxDepth}
+                }
+
+                st.success(f"Model trained and saved! Ready for ensemble. Click 📊 Visualize button to see training animation.")
                 st.markdown("### Model Performance")
                 c1, c2, c3 = st.columns(3)
-                
+
                 c1.metric(
                     "Training Accuracy",
                     f"{trainingAccuracy:.2%}",
@@ -994,7 +1704,7 @@ elif st.session_state.page == 'models':
                 plt.close()
                             
                 st.divider()
-                
+
                 # Detailed metrics
                 st.markdown("### 📋 Detailed Classification Report")
                 report = classification_report(y_test, yTestPred, target_names=['Died', 'Survived'], output_dict=True)
@@ -1139,7 +1849,29 @@ elif st.session_state.page == 'models':
                     report = classification_report(y_test, yTestPred, target_names=['Died', 'Survived'], output_dict=True)
                     report_df = pd.DataFrame(report).transpose()
                     st.dataframe(report_df.style.format("{:.2f}"), use_container_width=True)
-                    
+
+                    # Save model for ensemble
+                    modelName = f"Logistic Regression (C={C})"
+                    st.session_state.trained_models[modelName] = {
+                        'model': lrModel,
+                        'train_accuracy': trainingAccuracy,
+                        'test_accuracy': testingAccuracy,
+                        'hyperparams': {'C': C, 'penalty': penalty, 'solver': solver, 'max_iter': max_iter},
+                        'problem_type': 'classification'
+                    }
+
+                    # Save visualization data
+                    st.session_state.last_visualization = {
+                        'model_type': 'Logistic Regression',
+                        'model': lrModel,
+                        'X_train': X_train,
+                        'y_train': y_train,
+                        'features': features,
+                        'hyperparams': {'C': C}
+                    }
+
+                    st.success(f"Model trained and saved! Ready for ensemble. Click 📊 Visualize button to see training animation.")
+
                 except Exception as e:
                     st.error(f"Training failed: {str(e)}")
                     st.info("💡 Try changing the penalty/solver combination. Some combinations are incompatible (e.g., L1 penalty requires 'liblinear' or 'saga' solver).")
@@ -1269,6 +2001,28 @@ elif st.session_state.page == 'models':
                 report_df = pd.DataFrame(report).transpose()
                 st.dataframe(report_df.style.format("{:.2f}"), use_container_width=True)
 
+                # Save model for ensemble
+                modelName = f"SVM (kernel={kernel})"
+                st.session_state.trained_models[modelName] = {
+                    'model': svmModel,
+                    'train_accuracy': trainingAccuracy,
+                    'test_accuracy': testingAccuracy,
+                    'hyperparams': {'C': C, 'kernel': kernel, 'gamma': gamma},
+                    'problem_type': 'classification'
+                }
+
+                # Save visualization data
+                st.session_state.last_visualization = {
+                    'model_type': 'SVM',
+                    'model': svmModel,
+                    'X_train': X_train,
+                    'y_train': y_train,
+                    'features': features,
+                    'hyperparams': {'C': C, 'kernel': kernel}
+                }
+
+                st.success(f"Model trained and saved! Ready for ensemble. Click 📊 Visualize button to see training animation.")
+
 
     ######################################################### KNN ########################################################################################   
     elif model_choice == "KNN":
@@ -1390,6 +2144,679 @@ elif st.session_state.page == 'models':
                 report = classification_report(y_test, yTestPred, target_names=['Died', 'Survived'], output_dict=True)
                 report_df = pd.DataFrame(report).transpose()
                 st.dataframe(report_df.style.format("{:.2f}"), use_container_width=True)
+
+                # Save model for ensemble
+                modelName = f"KNN (k={n_neighbors})"
+                st.session_state.trained_models[modelName] = {
+                    'model': knnModel,
+                    'train_accuracy': trainingAccuracy,
+                    'test_accuracy': testingAccuracy,
+                    'hyperparams': {'n_neighbors': n_neighbors, 'weights': weights, 'metric': metric},
+                    'problem_type': 'classification'
+                }
+
+                # Save visualization data
+                st.session_state.last_visualization = {
+                    'model_type': 'KNN',
+                    'model': knnModel,
+                    'X_train': X_train,
+                    'y_train': y_train,
+                    'features': features,
+                    'hyperparams': {'n_neighbors': n_neighbors}
+                }
+
+                st.success(f"Model trained and saved! Ready for ensemble. Click 📊 Visualize button to see training animation.")
+
+    ############################################################## Perceptron ########################################################################################
+    elif model_choice == "Perceptron":
+        st.sidebar.markdown("### Hyperparameters")
+
+        penalty = st.sidebar.selectbox(
+            "Penalty",
+            [None, "l2", "l1", "elasticnet"],
+            help="Regularization term. 'l2' is standard, 'l1' promotes sparsity, 'elasticnet' combines both."
+        )
+
+        alpha = st.sidebar.select_slider(
+            "Alpha (Regularization Strength)",
+            options=[0.0001, 0.001, 0.01, 0.1],
+            value=0.0001,
+            help="Constant that multiplies the regularization term. Higher = stronger regularization."
+        )
+
+        maxIter = st.sidebar.slider(
+            "Max Iterations",
+            min_value=100,
+            max_value=2000,
+            value=1000,
+            step=100,
+            help="Maximum number of passes over the training data."
+        )
+
+        eta0 = st.sidebar.select_slider(
+            "Learning Rate (eta0)",
+            options=[0.1, 0.5, 1.0, 2.0],
+            value=1.0,
+            help="Constant by which the updates are multiplied."
+        )
+
+        if st.sidebar.button("Train Model", type="primary"):
+            with st.spinner("Training Perceptron..."):
+                perceptronModel = Perceptron(
+                    penalty=penalty,
+                    alpha=alpha,
+                    max_iter=maxIter,
+                    eta0=eta0,
+                    random_state=42
+                )
+                perceptronModel.fit(X_train, y_train)
+
+                yTrainPred = perceptronModel.predict(X_train)
+                yTestPred = perceptronModel.predict(X_test)
+
+                trainingAccuracy = accuracy_score(y_train, yTrainPred)
+                testingAccuracy = accuracy_score(y_test, yTestPred)
+                accuracyGap = trainingAccuracy - testingAccuracy
+
+                st.success("Model trained successfully!")
+                st.markdown("### Model Performance:")
+                c1, c2, c3 = st.columns(3)
+
+                c1.metric(
+                    "Training Accuracy",
+                    f"{trainingAccuracy:.2%}",
+                    help="Accuracy on training data"
+                )
+                c2.metric(
+                    "Test Accuracy",
+                    f"{testingAccuracy:.2%}",
+                    help="Accuracy on unseen test data"
+                )
+                c3.metric(
+                    "Accuracy Gap",
+                    f"{accuracyGap:.2%}",
+                    delta=f"{-accuracyGap:.2%}",
+                    delta_color="inverse",
+                    help="Difference between training and test accuracy"
+                )
+
+                st.markdown("### Interpretation:")
+                if accuracyGap > 0.15:
+                    st.error("**High overfitting detected!** Try increasing regularization (alpha) or using a penalty.")
+                elif accuracyGap > 0.10:
+                    st.warning("**Moderate overfitting.** Consider adjusting hyperparameters.")
+                elif testingAccuracy < 0.70:
+                    st.warning("**Low accuracy.** Perceptron works best on linearly separable data. Try other models.")
+                elif accuracyGap < 0.05 and testingAccuracy > 0.75:
+                    st.success("**Good job!** Your model generalizes well.")
+                else:
+                    st.info("Keep experimenting with hyperparameters!")
+
+                st.divider()
+
+                # Confusion Matrix
+                st.markdown("### Confusion Matrix (Test Set)")
+                with st.expander("Understanding the Confusion Matrix"):
+                    st.markdown("""
+                    - **Top-left (True Negative):** Correctly predicted deaths
+                    - **Top-right (False Positive):** Incorrectly predicted survival
+                    - **Bottom-left (False Negative):** Incorrectly predicted death
+                    - **Bottom-right (True Positive):** Correctly predicted survival
+                    """)
+
+                fig, ax = plt.subplots(figsize=(8, 6))
+                cm = confusion_matrix(y_test, yTestPred)
+                sns.heatmap(
+                    cm,
+                    annot=True,
+                    fmt='d',
+                    cmap='Greens',
+                    xticklabels=['Died', 'Survived'],
+                    yticklabels=['Died', 'Survived'],
+                    ax=ax,
+                    cbar_kws={'label': 'Count'}
+                )
+                ax.set_xlabel('Predicted', fontsize=12)
+                ax.set_ylabel('Actual', fontsize=12)
+                ax.set_title(f'Confusion Matrix - Test Accuracy: {testingAccuracy:.2%}', fontsize=14)
+
+                st.pyplot(fig)
+                plt.close()
+                st.divider()
+
+                st.markdown("### Detailed Classification Report")
+                report = classification_report(y_test, yTestPred, target_names=['Died', 'Survived'], output_dict=True)
+                report_df = pd.DataFrame(report).transpose()
+                st.dataframe(report_df.style.format("{:.2f}"), use_container_width=True)
+
+                # Save model for ensemble
+                modelName = f"Perceptron (alpha={alpha})"
+                st.session_state.trained_models[modelName] = {
+                    'model': perceptronModel,
+                    'train_accuracy': trainingAccuracy,
+                    'test_accuracy': testingAccuracy,
+                    'hyperparams': {'penalty': penalty, 'alpha': alpha, 'max_iter': maxIter, 'eta0': eta0},
+                    'problem_type': 'classification'
+                }
+
+                # Save visualization data
+                st.session_state.last_visualization = {
+                    'model_type': 'Perceptron',
+                    'model': perceptronModel,
+                    'X_train': X_train,
+                    'y_train': y_train,
+                    'features': features,
+                    'hyperparams': {'max_iter': maxIter, 'eta0': eta0}
+                }
+
+                st.success(f"Model trained and saved! Ready for ensemble. Click 📊 Visualize button to see training animation.")
+
+    ############################################################## Neural Network (MLP) ##############################################################################
+    elif model_choice == "Neural Network":
+        st.sidebar.markdown("### Hyperparameters")
+
+        numLayers = st.sidebar.slider(
+            "Number of Hidden Layers",
+            min_value=1,
+            max_value=3,
+            value=1,
+            help="How many hidden layers. More layers = can learn more complex patterns but risk overfitting."
+        )
+
+        neuronsPerLayer = st.sidebar.select_slider(
+            "Neurons per Layer",
+            options=[32, 64, 100, 128, 256],
+            value=100,
+            help="Number of neurons in each hidden layer. More neurons = more capacity but slower training."
+        )
+
+        # Build the tuple dynamically
+        hiddenLayerSizes = tuple([neuronsPerLayer] * numLayers)
+
+        activation = st.sidebar.selectbox(
+            "Activation Function",
+            ["relu", "tanh", "logistic"],
+            help="'relu' is most common and fastest. 'tanh' can work better for some problems."
+        )
+
+        solver = st.sidebar.selectbox(
+            "Solver",
+            ["adam", "sgd", "lbfgs"],
+            help="'adam' works well for most cases. 'sgd' for more control. 'lbfgs' for smaller datasets."
+        )
+
+        alpha = st.sidebar.select_slider(
+            "Alpha (L2 Regularization)",
+            options=[0.0001, 0.001, 0.01, 0.1],
+            value=0.0001,
+            help="L2 penalty parameter. Higher values = stronger regularization."
+        )
+
+        maxIter = st.sidebar.slider(
+            "Max Iterations",
+            min_value=100,
+            max_value=1000,
+            value=500,
+            step=50,
+            help="Maximum number of iterations for training."
+        )
+
+        if st.sidebar.button("Train Model", type="primary"):
+            with st.spinner("Training Neural Network (this may take a moment)..."):
+                mlpModel = MLPClassifier(
+                    hidden_layer_sizes=hiddenLayerSizes,
+                    activation=activation,
+                    solver=solver,
+                    alpha=alpha,
+                    max_iter=maxIter,
+                    random_state=42
+                )
+                mlpModel.fit(X_train, y_train)
+
+                yTrainPred = mlpModel.predict(X_train)
+                yTestPred = mlpModel.predict(X_test)
+
+                trainingAccuracy = accuracy_score(y_train, yTrainPred)
+                testingAccuracy = accuracy_score(y_test, yTestPred)
+                accuracyGap = trainingAccuracy - testingAccuracy
+
+                st.success("Model trained successfully!")
+                st.markdown("### Model Performance:")
+                c1, c2, c3 = st.columns(3)
+
+                c1.metric(
+                    "Training Accuracy",
+                    f"{trainingAccuracy:.2%}",
+                    help="Accuracy on training data"
+                )
+                c2.metric(
+                    "Test Accuracy",
+                    f"{testingAccuracy:.2%}",
+                    help="Accuracy on unseen test data"
+                )
+                c3.metric(
+                    "Accuracy Gap",
+                    f"{accuracyGap:.2%}",
+                    delta=f"{-accuracyGap:.2%}",
+                    delta_color="inverse",
+                    help="Difference between training and test accuracy"
+                )
+
+                st.markdown("### Interpretation:")
+                if accuracyGap > 0.15:
+                    st.error("**High overfitting!** Try increasing alpha, reducing hidden layer size, or using fewer iterations.")
+                elif accuracyGap > 0.10:
+                    st.warning("**Moderate overfitting.** Consider simpler architecture or more regularization.")
+                elif testingAccuracy < 0.70:
+                    st.warning("**Low accuracy.** Try a different architecture or more iterations.")
+                elif accuracyGap < 0.05 and testingAccuracy > 0.75:
+                    st.success("**Excellent!** Your neural network generalizes well.")
+                else:
+                    st.info("Keep experimenting with different architectures!")
+
+                st.divider()
+
+                # Confusion Matrix
+                st.markdown("### Confusion Matrix (Test Set)")
+                with st.expander("Understanding the Confusion Matrix"):
+                    st.markdown("""
+                    - **Top-left (True Negative):** Correctly predicted deaths
+                    - **Top-right (False Positive):** Incorrectly predicted survival
+                    - **Bottom-left (False Negative):** Incorrectly predicted death
+                    - **Bottom-right (True Positive):** Correctly predicted survival
+                    """)
+
+                fig, ax = plt.subplots(figsize=(8, 6))
+                cm = confusion_matrix(y_test, yTestPred)
+                sns.heatmap(
+                    cm,
+                    annot=True,
+                    fmt='d',
+                    cmap='RdPu',
+                    xticklabels=['Died', 'Survived'],
+                    yticklabels=['Died', 'Survived'],
+                    ax=ax,
+                    cbar_kws={'label': 'Count'}
+                )
+                ax.set_xlabel('Predicted', fontsize=12)
+                ax.set_ylabel('Actual', fontsize=12)
+                ax.set_title(f'Confusion Matrix - Test Accuracy: {testingAccuracy:.2%}', fontsize=14)
+
+                st.pyplot(fig)
+                plt.close()
+                st.divider()
+
+                st.markdown("### Detailed Classification Report")
+                report = classification_report(y_test, yTestPred, target_names=['Died', 'Survived'], output_dict=True)
+                report_df = pd.DataFrame(report).transpose()
+                st.dataframe(report_df.style.format("{:.2f}"), use_container_width=True)
+
+                # Save model for ensemble
+                layerDisplay = ", ".join([str(neuronsPerLayer)] * numLayers)
+                modelName = f"Neural Network ({layerDisplay})"
+                st.session_state.trained_models[modelName] = {
+                    'model': mlpModel,
+                    'train_accuracy': trainingAccuracy,
+                    'test_accuracy': testingAccuracy,
+                    'hyperparams': {'hidden_layer_sizes': hiddenLayerSizes, 'num_layers': numLayers, 'neurons_per_layer': neuronsPerLayer, 'activation': activation, 'solver': solver, 'alpha': alpha, 'max_iter': maxIter},
+                    'problem_type': 'classification'
+                }
+
+                # Save visualization data
+                st.session_state.last_visualization = {
+                    'model_type': 'Neural Network',
+                    'model': mlpModel,
+                    'X_train': X_train,
+                    'y_train': y_train,
+                    'features': features,
+                    'hyperparams': {'hidden_layer_sizes': hiddenLayerSizes, 'activation': activation, 'max_iter': maxIter}
+                }
+
+                st.success(f"Model trained and saved! Ready for ensemble. Click 📊 Visualize button to see training animation.")
+
+    ############################################################## Linear Regression #################################################################################
+    elif model_choice == "Linear Regression":
+        st.sidebar.markdown("### Hyperparameters")
+        st.sidebar.info("Linear Regression has no hyperparameters to tune. It finds the best-fit line automatically.")
+
+        if st.sidebar.button("Train Model", type="primary"):
+            with st.spinner("Training Linear Regression..."):
+                linearModel = LinearRegression()
+                linearModel.fit(X_train, y_train)
+
+                yTrainPred = linearModel.predict(X_train)
+                yTestPred = linearModel.predict(X_test)
+
+                # Convert to binary for accuracy comparison
+                yTrainPredBinary = (yTrainPred >= 0.5).astype(int)
+                yTestPredBinary = (yTestPred >= 0.5).astype(int)
+
+                trainingAccuracy = accuracy_score(y_train, yTrainPredBinary)
+                testingAccuracy = accuracy_score(y_test, yTestPredBinary)
+
+                # Regression metrics
+                r2Train = r2_score(y_train, yTrainPred)
+                r2Test = r2_score(y_test, yTestPred)
+                mseTest = mean_squared_error(y_test, yTestPred)
+                maeTest = mean_absolute_error(y_test, yTestPred)
+
+                st.success("Model trained successfully!")
+
+                st.markdown("### Regression Metrics:")
+                c1, c2, c3, c4 = st.columns(4)
+                with c1:
+                    st.metric("R² (Train)", f"{r2Train:.4f}")
+                    with st.popover("ℹ️"):
+                        st.markdown("**R² (Train)**")
+                        st.write("R-squared measures how well the model explains variance in the training data. 1.0 = perfect fit, 0.0 = no explanatory power. Higher is better, but very high values may indicate overfitting.")
+                with c2:
+                    st.metric("R² (Test)", f"{r2Test:.4f}")
+                    with st.popover("ℹ️"):
+                        st.markdown("**R² (Test)**")
+                        st.write("R-squared on unseen test data. Shows how well the model generalizes. Compare with R² (Train) - a large gap suggests overfitting.")
+                with c3:
+                    st.metric("MSE", f"{mseTest:.4f}")
+                    with st.popover("ℹ️"):
+                        st.markdown("**Mean Squared Error**")
+                        st.write("Average of squared differences between predicted and actual values. Penalizes larger errors more heavily. Lower is better.")
+                with c4:
+                    st.metric("MAE", f"{maeTest:.4f}")
+                    with st.popover("ℹ️"):
+                        st.markdown("**Mean Absolute Error**")
+                        st.write("Average of absolute differences between predicted and actual values. More interpretable than MSE. Lower is better.")
+
+                st.divider()
+
+                st.markdown("### Classification Accuracy (threshold = 0.5):")
+                c1, c2 = st.columns(2)
+                c1.metric("Training Accuracy", f"{trainingAccuracy:.2%}")
+                c2.metric("Test Accuracy", f"{testingAccuracy:.2%}")
+
+                st.markdown("### Interpretation:")
+                if r2Test > 0.3:
+                    st.success("**Good fit!** The model explains a reasonable amount of variance.")
+                else:
+                    st.warning("**Low R².** Linear regression may not be ideal for this binary classification problem.")
+
+                st.divider()
+
+                # Confusion Matrix
+                st.markdown("### Confusion Matrix (Test Set)")
+                fig, ax = plt.subplots(figsize=(8, 6))
+                cm = confusion_matrix(y_test, yTestPredBinary)
+                sns.heatmap(
+                    cm,
+                    annot=True,
+                    fmt='d',
+                    cmap='Blues',
+                    xticklabels=['Died', 'Survived'],
+                    yticklabels=['Died', 'Survived'],
+                    ax=ax,
+                    cbar_kws={'label': 'Count'}
+                )
+                ax.set_xlabel('Predicted', fontsize=12)
+                ax.set_ylabel('Actual', fontsize=12)
+                ax.set_title(f'Confusion Matrix - Test Accuracy: {testingAccuracy:.2%}', fontsize=14)
+
+                st.pyplot(fig)
+                plt.close()
+
+                # Save model for ensemble
+                modelName = "Linear Regression"
+                st.session_state.trained_models[modelName] = {
+                    'model': linearModel,
+                    'train_accuracy': trainingAccuracy,
+                    'test_accuracy': testingAccuracy,
+                    'hyperparams': {},
+                    'problem_type': 'regression'
+                }
+
+                # Save visualization data
+                st.session_state.last_visualization = {
+                    'model_type': 'Linear Regression',
+                    'model': linearModel,
+                    'X_train': X_train,
+                    'y_train': y_train,
+                    'features': features,
+                    'hyperparams': {}
+                }
+
+                st.success(f"Model trained and saved! Ready for ensemble. Click 📊 Visualize button to see training animation.")
+
+    ############################################################## Ridge Regression ##################################################################################
+    elif model_choice == "Ridge Regression":
+        st.sidebar.markdown("### Hyperparameters")
+
+        alpha = st.sidebar.select_slider(
+            "Alpha (Regularization Strength)",
+            options=[0.01, 0.1, 1.0, 10.0, 100.0],
+            value=1.0,
+            help="L2 regularization strength. Higher = more regularization, simpler model."
+        )
+
+        if st.sidebar.button("Train Model", type="primary"):
+            with st.spinner("Training Ridge Regression..."):
+                ridgeModel = Ridge(alpha=alpha, random_state=42)
+                ridgeModel.fit(X_train, y_train)
+
+                yTrainPred = ridgeModel.predict(X_train)
+                yTestPred = ridgeModel.predict(X_test)
+
+                yTrainPredBinary = (yTrainPred >= 0.5).astype(int)
+                yTestPredBinary = (yTestPred >= 0.5).astype(int)
+
+                trainingAccuracy = accuracy_score(y_train, yTrainPredBinary)
+                testingAccuracy = accuracy_score(y_test, yTestPredBinary)
+
+                r2Train = r2_score(y_train, yTrainPred)
+                r2Test = r2_score(y_test, yTestPred)
+                mseTest = mean_squared_error(y_test, yTestPred)
+                maeTest = mean_absolute_error(y_test, yTestPred)
+
+                st.success("Model trained successfully!")
+
+                st.markdown("### Regression Metrics:")
+                c1, c2, c3, c4 = st.columns(4)
+                with c1:
+                    st.metric("R² (Train)", f"{r2Train:.4f}")
+                    with st.popover("ℹ️"):
+                        st.markdown("**R² (Train)**")
+                        st.write("R-squared measures how well the model explains variance in the training data. 1.0 = perfect fit, 0.0 = no explanatory power. Higher is better, but very high values may indicate overfitting.")
+                with c2:
+                    st.metric("R² (Test)", f"{r2Test:.4f}")
+                    with st.popover("ℹ️"):
+                        st.markdown("**R² (Test)**")
+                        st.write("R-squared on unseen test data. Shows how well the model generalizes. Compare with R² (Train) - a large gap suggests overfitting.")
+                with c3:
+                    st.metric("MSE", f"{mseTest:.4f}")
+                    with st.popover("ℹ️"):
+                        st.markdown("**Mean Squared Error**")
+                        st.write("Average of squared differences between predicted and actual values. Penalizes larger errors more heavily. Lower is better.")
+                with c4:
+                    st.metric("MAE", f"{maeTest:.4f}")
+                    with st.popover("ℹ️"):
+                        st.markdown("**Mean Absolute Error**")
+                        st.write("Average of absolute differences between predicted and actual values. More interpretable than MSE. Lower is better.")
+
+                st.divider()
+
+                st.markdown("### Classification Accuracy (threshold = 0.5):")
+                c1, c2 = st.columns(2)
+                c1.metric("Training Accuracy", f"{trainingAccuracy:.2%}")
+                c2.metric("Test Accuracy", f"{testingAccuracy:.2%}")
+
+                st.markdown("### Interpretation:")
+                st.info(f"**Ridge Regression** uses L2 regularization to prevent overfitting. Alpha={alpha} controls the regularization strength.")
+
+                st.divider()
+
+                st.markdown("### Confusion Matrix (Test Set)")
+                fig, ax = plt.subplots(figsize=(8, 6))
+                cm = confusion_matrix(y_test, yTestPredBinary)
+                sns.heatmap(
+                    cm,
+                    annot=True,
+                    fmt='d',
+                    cmap='Greens',
+                    xticklabels=['Died', 'Survived'],
+                    yticklabels=['Died', 'Survived'],
+                    ax=ax,
+                    cbar_kws={'label': 'Count'}
+                )
+                ax.set_xlabel('Predicted', fontsize=12)
+                ax.set_ylabel('Actual', fontsize=12)
+                ax.set_title(f'Confusion Matrix - Test Accuracy: {testingAccuracy:.2%}', fontsize=14)
+
+                st.pyplot(fig)
+                plt.close()
+
+                # Save model for ensemble
+                modelName = f"Ridge Regression (alpha={alpha})"
+                st.session_state.trained_models[modelName] = {
+                    'model': ridgeModel,
+                    'train_accuracy': trainingAccuracy,
+                    'test_accuracy': testingAccuracy,
+                    'hyperparams': {'alpha': alpha},
+                    'problem_type': 'regression'
+                }
+
+                # Save visualization data
+                st.session_state.last_visualization = {
+                    'model_type': 'Ridge Regression',
+                    'model': ridgeModel,
+                    'X_train': X_train,
+                    'y_train': y_train,
+                    'features': features,
+                    'hyperparams': {'alpha': alpha}
+                }
+
+                st.success(f"Model trained and saved! Ready for ensemble. Click 📊 Visualize button to see training animation.")
+
+    ############################################################## Lasso Regression ##################################################################################
+    elif model_choice == "Lasso Regression":
+        st.sidebar.markdown("### Hyperparameters")
+
+        alpha = st.sidebar.select_slider(
+            "Alpha (Regularization Strength)",
+            options=[0.0001, 0.001, 0.01, 0.1, 1.0],
+            value=0.01,
+            help="L1 regularization strength. Higher = more features set to zero (feature selection)."
+        )
+
+        maxIter = st.sidebar.slider(
+            "Max Iterations",
+            min_value=1000,
+            max_value=10000,
+            value=5000,
+            step=1000,
+            help="Maximum number of iterations for convergence."
+        )
+
+        if st.sidebar.button("Train Model", type="primary"):
+            with st.spinner("Training Lasso Regression..."):
+                lassoModel = Lasso(alpha=alpha, max_iter=maxIter, random_state=42)
+                lassoModel.fit(X_train, y_train)
+
+                yTrainPred = lassoModel.predict(X_train)
+                yTestPred = lassoModel.predict(X_test)
+
+                yTrainPredBinary = (yTrainPred >= 0.5).astype(int)
+                yTestPredBinary = (yTestPred >= 0.5).astype(int)
+
+                trainingAccuracy = accuracy_score(y_train, yTrainPredBinary)
+                testingAccuracy = accuracy_score(y_test, yTestPredBinary)
+
+                r2Train = r2_score(y_train, yTrainPred)
+                r2Test = r2_score(y_test, yTestPred)
+                mseTest = mean_squared_error(y_test, yTestPred)
+                maeTest = mean_absolute_error(y_test, yTestPred)
+
+                st.success("Model trained successfully!")
+
+                st.markdown("### Regression Metrics:")
+                c1, c2, c3, c4 = st.columns(4)
+                with c1:
+                    st.metric("R² (Train)", f"{r2Train:.4f}")
+                    with st.popover("ℹ️"):
+                        st.markdown("**R² (Train)**")
+                        st.write("R-squared measures how well the model explains variance in the training data. 1.0 = perfect fit, 0.0 = no explanatory power. Higher is better, but very high values may indicate overfitting.")
+                with c2:
+                    st.metric("R² (Test)", f"{r2Test:.4f}")
+                    with st.popover("ℹ️"):
+                        st.markdown("**R² (Test)**")
+                        st.write("R-squared on unseen test data. Shows how well the model generalizes. Compare with R² (Train) - a large gap suggests overfitting.")
+                with c3:
+                    st.metric("MSE", f"{mseTest:.4f}")
+                    with st.popover("ℹ️"):
+                        st.markdown("**Mean Squared Error**")
+                        st.write("Average of squared differences between predicted and actual values. Penalizes larger errors more heavily. Lower is better.")
+                with c4:
+                    st.metric("MAE", f"{maeTest:.4f}")
+                    with st.popover("ℹ️"):
+                        st.markdown("**Mean Absolute Error**")
+                        st.write("Average of absolute differences between predicted and actual values. More interpretable than MSE. Lower is better.")
+
+                st.divider()
+
+                st.markdown("### Classification Accuracy (threshold = 0.5):")
+                c1, c2 = st.columns(2)
+                c1.metric("Training Accuracy", f"{trainingAccuracy:.2%}")
+                c2.metric("Test Accuracy", f"{testingAccuracy:.2%}")
+
+                st.markdown("### Interpretation:")
+                st.info(f"**Lasso Regression** uses L1 regularization which can set some feature coefficients to exactly zero, performing automatic feature selection.")
+
+                # Show feature coefficients
+                st.markdown("### Feature Coefficients:")
+                coef_df = pd.DataFrame({
+                    'Feature': features,
+                    'Coefficient': lassoModel.coef_
+                }).sort_values('Coefficient', key=abs, ascending=False)
+                st.dataframe(coef_df, use_container_width=True)
+
+                st.divider()
+
+                st.markdown("### Confusion Matrix (Test Set)")
+                fig, ax = plt.subplots(figsize=(8, 6))
+                cm = confusion_matrix(y_test, yTestPredBinary)
+                sns.heatmap(
+                    cm,
+                    annot=True,
+                    fmt='d',
+                    cmap='Oranges',
+                    xticklabels=['Died', 'Survived'],
+                    yticklabels=['Died', 'Survived'],
+                    ax=ax,
+                    cbar_kws={'label': 'Count'}
+                )
+                ax.set_xlabel('Predicted', fontsize=12)
+                ax.set_ylabel('Actual', fontsize=12)
+                ax.set_title(f'Confusion Matrix - Test Accuracy: {testingAccuracy:.2%}', fontsize=14)
+
+                st.pyplot(fig)
+                plt.close()
+
+                # Save model for ensemble
+                modelName = f"Lasso Regression (alpha={alpha})"
+                st.session_state.trained_models[modelName] = {
+                    'model': lassoModel,
+                    'train_accuracy': trainingAccuracy,
+                    'test_accuracy': testingAccuracy,
+                    'hyperparams': {'alpha': alpha, 'max_iter': maxIter},
+                    'problem_type': 'regression'
+                }
+
+                # Save visualization data
+                st.session_state.last_visualization = {
+                    'model_type': 'Lasso Regression',
+                    'model': lassoModel,
+                    'X_train': X_train,
+                    'y_train': y_train,
+                    'features': features,
+                    'hyperparams': {'alpha': alpha}
+                }
+
+                st.success(f"Model trained and saved! Ready for ensemble. Click 📊 Visualize button to see training animation.")
 
     ##############################################################sidebar#############################################################################
 
